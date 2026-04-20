@@ -1,4 +1,7 @@
 (() => {
+  const MAX_RUN_POLL_ATTEMPTS = 15;
+  const RUN_POLL_INTERVAL_MS = 1000;
+
   const state = {
     user: {
       name: 'You',
@@ -146,7 +149,7 @@
       assistant_id: agent.foundryAgentId
     });
 
-    for (let i = 0; i < 15; i += 1) {
+    for (let i = 0; i < MAX_RUN_POLL_ATTEMPTS; i += 1) {
       const runStatus = await foundryRequest(`/threads/${thread.id}/runs/${run.id}`, 'GET');
       if (runStatus.status === 'completed') {
         break;
@@ -154,7 +157,7 @@
       if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
         throw new Error(`Run ended with status: ${runStatus.status}`);
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, RUN_POLL_INTERVAL_MS));
     }
 
     const messages = await foundryRequest(`/threads/${thread.id}/messages?order=desc`, 'GET');

@@ -23,7 +23,7 @@ A browser-based, pixel-styled office UI for visually demonstrating Azure AI Foun
 Because this is a static app, you can run it with a simple local web server:
 
 ```bash
-cd /home/runner/work/foundry-ui-as-a-game/foundry-ui-as-a-game
+cd foundry-ui-as-a-game
 python3 -m http.server 4173
 ```
 
