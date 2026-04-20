@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Foundry UI as a Game</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>Foundry UI as a Game</h1>
+        <p class="subtitle">Pixel-style office for visual multi-agent demos</p>
+      </header>
+
+      <section class="panel auth-panel">
+        <h2>1) Entra Authentication (No API Keys)</h2>
+        <div class="grid two-col">
+          <label>Tenant ID <input id="tenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></label>
+          <label>Client ID <input id="clientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></label>
+          <label>Foundry Scope <input id="scope" value="https://cognitiveservices.azure.com/.default" /></label>
+          <label>Project Endpoint <input id="projectEndpoint" placeholder="https://<resource>.services.ai.azure.com/api/projects/<project>" /></label>
+          <label>Model Deployment <input id="modelDeployment" placeholder="e.g. gpt-4o-mini" /></label>
+          <label>API Version <input id="apiVersion" value="2024-05-01-preview" /></label>
+        </div>
+        <div class="row">
+          <button id="loginBtn">Login with Entra</button>
+          <span id="authStatus" class="status">Not signed in</span>
+        </div>
+      </section>
+
+      <section class="panel control-panel">
+        <h2>2) Agents, Workflow, and Messaging</h2>
+        <div class="grid two-col">
+          <fieldset>
+            <legend>Create NPC (Creates Foundry Agent)</legend>
+            <label>Name <input id="npcName" maxlength="40" /></label>
+            <label>Description/System Prompt
+              <textarea id="npcDescription" rows="4" placeholder="Helpful finance specialist agent"></textarea>
+            </label>
+            <button id="createNpcBtn">Create NPC Agent</button>
+          </fieldset>
+
+          <fieldset>
+            <legend>Workflow</legend>
+            <label>Strategy
+              <select id="workflowMode">
+                <option value="group">Group (all enabled agents respond)</option>
+                <option value="sequential">Sequential (enabled agents respond in order)</option>
+              </select>
+            </label>
+            <small>Disabled agents go to sleep at their desk.</small>
+          </fieldset>
+        </div>
+
+        <div class="row message-row">
+          <input id="userMessage" placeholder="Type what your character says to the office..." />
+          <button id="sendMessageBtn">Speak</button>
+        </div>
+
+        <div id="agentList" class="agent-list"></div>
+        <p id="eventLog" class="log"></p>
+      </section>
+
+      <section class="panel world-panel">
+        <h2>3) Office View</h2>
+        <div id="office" class="office"></div>
+      </section>
+    </main>
+  </body>
+</html>
