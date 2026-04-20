@@ -1,6 +1,7 @@
 (() => {
   const MAX_RUN_POLL_ATTEMPTS = 15;
   const RUN_POLL_INTERVAL_MS = 1000;
+  const RUN_POLL_TIMEOUT_MS = MAX_RUN_POLL_ATTEMPTS * RUN_POLL_INTERVAL_MS;
 
   const state = {
     user: {
@@ -46,6 +47,13 @@
 
   function setLog(message) {
     ids.eventLog.textContent = message;
+  }
+
+  function createLocalId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
   function settings() {
@@ -149,9 +157,11 @@
       assistant_id: agent.foundryAgentId
     });
 
+    let completed = false;
     for (let i = 0; i < MAX_RUN_POLL_ATTEMPTS; i += 1) {
       const runStatus = await foundryRequest(`/threads/${thread.id}/runs/${run.id}`, 'GET');
       if (runStatus.status === 'completed') {
+        completed = true;
         break;
       }
       if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
@@ -159,11 +169,14 @@
       }
       await new Promise((resolve) => setTimeout(resolve, RUN_POLL_INTERVAL_MS));
     }
+    if (!completed) {
+      throw new Error(`Run did not complete within ${RUN_POLL_TIMEOUT_MS / 1000} seconds.`);
+    }
 
     const messages = await foundryRequest(`/threads/${thread.id}/messages?order=desc`, 'GET');
     const assistantMessage = (messages.data || []).find((m) => m.role === 'assistant');
     const textValue = assistantMessage?.content?.[0]?.text?.value;
-    return textValue || '(No assistant response text)';
+    return textValue || 'No response received from agent.';
   }
 
   function getDeskForAgent(index) {
@@ -255,7 +268,7 @@
       setLog(`Creating Foundry agent "${name}"...`);
       const foundryAgentId = await createFoundryAgent(name, description);
       state.agents.push({
-        id: crypto.randomUUID(),
+        id: createLocalId(),
         name,
         description,
         foundryAgentId,
