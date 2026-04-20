@@ -293,7 +293,7 @@
     }
 
     if (state.workflowMode === 'group') {
-      await Promise.all(enabledAgents.map(async (agent) => {
+      const results = await Promise.allSettled(enabledAgents.map(async (agent) => {
         try {
           const response = await sendMessageToFoundryAgent(agent, message);
           agent.lastSpeech = response;
@@ -301,6 +301,13 @@
           throw new Error(`${agent.name} failed in group workflow: ${error.message}`);
         }
       }));
+
+      const failures = results
+        .filter((result) => result.status === 'rejected')
+        .map((result) => result.reason.message);
+      if (failures.length) {
+        throw new Error(failures.join(' | '));
+      }
       return;
     }
 
