@@ -170,7 +170,7 @@
       await new Promise((resolve) => setTimeout(resolve, RUN_POLL_INTERVAL_MS));
     }
     if (!completed) {
-      throw new Error(`${agent.name} did not complete within ${RUN_POLL_TIMEOUT_MS / 1000} seconds.`);
+      throw new Error(`${agent.name} timed out after ${RUN_POLL_TIMEOUT_MS / 1000} seconds.`);
     }
 
     const messages = await foundryRequest(`/threads/${thread.id}/messages?order=desc`, 'GET');
@@ -298,7 +298,7 @@
           const response = await sendMessageToFoundryAgent(agent, message);
           agent.lastSpeech = response;
         } catch (error) {
-          throw new Error(`${agent.name} failed in group workflow: ${error.message}`);
+          throw new Error(`Agent ${agent.name} failed in group workflow: ${error.message}`);
         }
       }));
 
@@ -318,7 +318,7 @@
         agent.lastSpeech = response;
         rollingMessage = `Previous agent response: ${response}`;
       } catch (error) {
-        throw new Error(`${agent.name} failed in sequential workflow: ${error.message}`);
+        throw new Error(`Agent ${agent.name} failed in sequential workflow: ${error.message}`);
       }
     }
   }
