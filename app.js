@@ -170,7 +170,7 @@
       await new Promise((resolve) => setTimeout(resolve, RUN_POLL_INTERVAL_MS));
     }
     if (!completed) {
-      throw new Error(`Run did not complete within ${RUN_POLL_TIMEOUT_MS / 1000} seconds.`);
+      throw new Error(`${agent.name} did not complete within ${RUN_POLL_TIMEOUT_MS / 1000} seconds.`);
     }
 
     const messages = await foundryRequest(`/threads/${thread.id}/messages?order=desc`, 'GET');
@@ -294,17 +294,25 @@
 
     if (state.workflowMode === 'group') {
       await Promise.all(enabledAgents.map(async (agent) => {
-        const response = await sendMessageToFoundryAgent(agent, message);
-        agent.lastSpeech = response;
+        try {
+          const response = await sendMessageToFoundryAgent(agent, message);
+          agent.lastSpeech = response;
+        } catch (error) {
+          throw new Error(`${agent.name} failed in group workflow: ${error.message}`);
+        }
       }));
       return;
     }
 
     let rollingMessage = message;
     for (const agent of enabledAgents) {
-      const response = await sendMessageToFoundryAgent(agent, rollingMessage);
-      agent.lastSpeech = response;
-      rollingMessage = `Previous agent response: ${response}`;
+      try {
+        const response = await sendMessageToFoundryAgent(agent, rollingMessage);
+        agent.lastSpeech = response;
+        rollingMessage = `Previous agent response: ${response}`;
+      } catch (error) {
+        throw new Error(`${agent.name} failed in sequential workflow: ${error.message}`);
+      }
     }
   }
 
