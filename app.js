@@ -147,7 +147,11 @@
     traceSidebar: document.getElementById('traceSidebar'),
     traceResizeHandle: document.getElementById('traceResizeHandle'),
     hideTraceBtn: document.getElementById('hideTraceBtn'),
-    showTraceBtn: document.getElementById('showTraceBtn')
+    showTraceBtn: document.getElementById('showTraceBtn'),
+    agentDetailModal: document.getElementById('agentDetailModal'),
+    agentDetailTitle: document.getElementById('agentDetailTitle'),
+    agentDetailBody: document.getElementById('agentDetailBody'),
+    closeAgentDetailBtn: document.getElementById('closeAgentDetailBtn')
   };
 
   function setLog(message) {
@@ -156,6 +160,62 @@
 
   function setModalLog(message) {
     ids.modalLog.textContent = message;
+  }
+
+  function esc(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  }
+
+  function showAgentDetail(agentId) {
+    const agent = state.agents.find((a) => a.id === agentId);
+    if (!agent) return;
+
+    ids.agentDetailTitle.textContent = agent.name;
+
+    const rows = [
+      ['Foundry ID', agent.foundryAgentId || '—'],
+      ['Name', agent.foundryAgentName || agent.name],
+      ['Kind', agent.kind || '—'],
+      ['Model', agent.model || '—'],
+      ['Guardrail', agent.guardrail || 'None'],
+      ['Status', agent.enabled ? 'Enabled' : 'Disabled'],
+    ];
+
+    let html = '<table>';
+    rows.forEach(([label, val]) => {
+      html += `<tr><th>${esc(label)}</th><td>${esc(val)}</td></tr>`;
+    });
+    html += '</table>';
+
+    html += '<h3>System Prompt / Instructions</h3>';
+    html += `<pre>${esc(agent.description || 'None')}</pre>`;
+
+    if (agent.tools && agent.tools.length) {
+      html += '<h3>Tools</h3><ul>';
+      agent.tools.forEach((t) => { html += `<li>${esc(t)}</li>`; });
+      html += '</ul>';
+    }
+    if (agent.knowledge && agent.knowledge.length) {
+      html += '<h3>Knowledge Sources</h3><ul>';
+      agent.knowledge.forEach((k) => { html += `<li>${esc(k)}</li>`; });
+      html += '</ul>';
+    }
+    if (agent.memory && agent.memory.length) {
+      html += '<h3>Memory Stores</h3><ul>';
+      agent.memory.forEach((m) => { html += `<li>${esc(m)}</li>`; });
+      html += '</ul>';
+    }
+    if (agent.toolsRaw && agent.toolsRaw.length) {
+      html += '<h3>Raw Tool Definitions</h3>';
+      html += `<pre>${esc(JSON.stringify(agent.toolsRaw, null, 2))}</pre>`;
+    }
+    if (agent.raiConfig && Object.keys(agent.raiConfig).length) {
+      html += '<h3>RAI / Content Safety Config</h3>';
+      html += `<pre>${esc(JSON.stringify(agent.raiConfig, null, 2))}</pre>`;
+    }
+
+    ids.agentDetailBody.innerHTML = html;
+    ids.agentDetailModal.style.display = 'flex';
   }
 
   function createLocalId() {
@@ -373,7 +433,7 @@
       ].filter(Boolean).join(' ');
 
       card.innerHTML = `
-        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span>${escapedName}<span class="info-bubble" data-tooltip="${escapedDesc}">i</span></div>
+        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span><a href="#" class="agent-name-link" data-agent-detail="${agent.id}">${escapedName}</a><span class="info-bubble" data-tooltip="${escapedDesc}">i</span></div>
         <div class="status"><label><input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" /> ${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</label></div>
         ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
         <div class="agent-chat">
@@ -849,6 +909,20 @@
     if (e.target === ids.createAgentModal) ids.createAgentModal.style.display = 'none';
   });
 
+  // ── Agent detail modal ────────────────────────
+  ids.closeAgentDetailBtn.addEventListener('click', () => {
+    ids.agentDetailModal.style.display = 'none';
+  });
+  ids.agentDetailModal.addEventListener('click', (e) => {
+    if (e.target === ids.agentDetailModal) ids.agentDetailModal.style.display = 'none';
+  });
+  ids.agentList.addEventListener('click', (e) => {
+    const link = e.target.closest('.agent-name-link');
+    if (!link) return;
+    e.preventDefault();
+    showAgentDetail(link.dataset.agentDetail);
+  });
+
   function renderOrchestrationInfo() {
     const mode = state.workflowMode;
     const info = ORCHESTRATION_INFO[mode] || ORCHESTRATION_INFO.concurrent;
@@ -904,10 +978,14 @@
             description: ra.instructions || '',
             foundryAgentId: ra.id,
             foundryAgentName: ra.name,
+            kind: ra.kind || '',
+            model: ra.model || '',
             tools: ra.tools || [],
+            toolsRaw: ra.tools_raw || [],
             knowledge: ra.knowledge || [],
             memory: ra.memory || [],
             guardrail: ra.guardrail || '',
+            raiConfig: ra.rai_config || {},
             enabled: state.agents.filter((a) => a.enabled).length < MAX_ENABLED_AGENTS,
             lastSpeech: 'Ready to help!',
             bubbleSpeech: ''

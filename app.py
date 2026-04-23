@@ -220,10 +220,14 @@ def list_agents() -> Any:
             "id": a.get("id"),
             "name": a.get("name"),
             "instructions": defn.get("instructions") or "",
+            "kind": defn.get("kind") or "",
+            "model": defn.get("model") or "",
+            "tools_raw": tools_raw,
             "tools": tools,
             "knowledge": knowledge,
             "memory": memory,
             "guardrail": guardrail,
+            "rai_config": rai,
         })
     return jsonify(out)
 

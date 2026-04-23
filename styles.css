@@ -329,6 +329,17 @@ button:hover {
   gap: 4px;
 }
 
+.agent-name-link {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--muted);
+  cursor: pointer;
+}
+
+.agent-name-link:hover {
+  color: var(--accent);
+}
+
 .info-bubble {
   display: inline-flex;
   align-items: center;
@@ -460,6 +471,59 @@ button:hover {
 
 .modal-head button:hover {
   color: var(--text);
+}
+
+.modal-box-wide {
+  width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.agent-detail-body {
+  font-size: 0.85rem;
+}
+
+.agent-detail-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0.75rem;
+}
+
+.agent-detail-body th,
+.agent-detail-body td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.agent-detail-body th {
+  width: 120px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.agent-detail-body td {
+  word-break: break-word;
+}
+
+.agent-detail-body h3 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+.agent-detail-body pre {
+  background: #f3f4f6;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 /* ── Office View ─────────────────────────────────── */
