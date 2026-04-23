@@ -45,3 +45,17 @@
 - Foundry settings provided via `.env` or environment variables.
 - Required: `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_MODEL_DEPLOYMENT`.
 - Optional: `FOUNDRY_API_VERSION` (defaults to `v1`), `FOUNDRY_SCOPE`.
+
+## Text-to-Speech (MAI-Voice-1)
+- Optional TTS feature: agents speak their responses aloud using Azure Speech Service (MAI-Voice-1).
+- Each agent is assigned a distinct voice actor from the MAI-Voice-1 prebuilt voice roster (Jasper, June, Grant, Iris, Reed, Joy).
+- Voice assignments are configurable per-agent via the Settings modal.
+- Settings button in the sidebar footer opens a lightbox to toggle TTS and manage voice assignments.
+- TTS is gracefully optional: the app works normally when Speech credentials are not configured.
+- Audio responses are queued and played sequentially to avoid overlap.
+- A 🔊 icon appears on the agent's speech bubble while audio is playing.
+- `GET /api/tts/status` reports whether TTS is available and lists voices.
+- `POST /api/tts` synthesizes speech from text using the selected MAI-Voice-1 voice.
+- Supports key-based auth (`AZURE_SPEECH_KEY`) or automatic `DefaultAzureCredential` fallback (no key required).
+- When `AZURE_SPEECH_RESOURCE_ID` is set, uses `aad#resource_id#token` auth format; otherwise uses plain Bearer token.
+- Optional: `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, `AZURE_SPEECH_TTS_ENDPOINT`, `AZURE_SPEECH_RESOURCE_ID`.

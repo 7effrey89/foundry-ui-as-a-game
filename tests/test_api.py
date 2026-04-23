@@ -140,7 +140,7 @@ def test_foundry_request_appends_api_version(monkeypatch):
         def get_token(self, scope):
             return FakeToken()
 
-    monkeypatch.setattr(target, "credential", FakeCredential())
+    monkeypatch.setattr(target, "FOUNDRY_API_VERSION", "v1")
 
     captured_url = {}
 
@@ -793,3 +793,255 @@ def test_record_metrics_handles_legacy_token_keys():
     assert m["prompt_tokens"] == 80
     assert m["completion_tokens"] == 40
     assert m["total_tokens"] == 120
+
+
+# --- TTS tests ---
+
+
+def test_tts_status_unavailable_when_no_endpoint(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_TTS_ENDPOINT", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_RESOURCE_ID", "")
+
+    response = client.get("/api/tts/status")
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data["available"] is False
+    assert isinstance(data["voices"], list)
+
+
+def test_tts_status_available_with_key(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "test-key")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "eastus")
+
+    response = client.get("/api/tts/status")
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data["available"] is True
+    assert len(data["voices"]) == 6
+
+
+def test_tts_status_available_with_region_only(monkeypatch):
+    """TTS is available when region is set, even without key or resource ID."""
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "eastus")
+    monkeypatch.setattr(target, "AZURE_SPEECH_RESOURCE_ID", "")
+
+    response = client.get("/api/tts/status")
+    data = response.get_json()
+    assert response.status_code == 200
+    assert data["available"] is True
+
+
+def test_tts_requires_text():
+    client = make_client()
+    response = client.post("/api/tts", json={"voice": "en-us-Jasper:MAI-Voice-1"})
+    assert response.status_code == 400
+    assert "text" in response.get_json()["error"]
+
+
+def test_tts_requires_voice():
+    client = make_client()
+    response = client.post("/api/tts", json={"text": "Hello"})
+    assert response.status_code == 400
+    assert "voice" in response.get_json()["error"]
+
+
+def test_tts_rejects_unknown_voice():
+    client = make_client()
+    response = client.post("/api/tts", json={"text": "Hello", "voice": "unknown-voice"})
+    assert response.status_code == 400
+    assert "Unknown voice" in response.get_json()["error"]
+
+
+def test_tts_returns_audio(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "test-key")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "eastus")
+    monkeypatch.setattr(target, "AZURE_SPEECH_TTS_ENDPOINT", "")
+
+    class FakeTtsResponse:
+        ok = True
+        status_code = 200
+        content = b"fake-audio-bytes"
+        text = ""
+
+    captured = {}
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["data"] = data
+        return FakeTtsResponse()
+
+    monkeypatch.setattr(target.requests, "post", fake_post)
+
+    response = client.post(
+        "/api/tts",
+        json={"text": "Hello world", "voice": "en-us-Jasper:MAI-Voice-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.content_type == "audio/mpeg"
+    assert response.data == b"fake-audio-bytes"
+    assert "eastus.tts.speech.microsoft.com" in captured["url"]
+    assert captured["headers"]["Ocp-Apim-Subscription-Key"] == "test-key"
+    assert b"en-us-Jasper:MAI-Voice-1" in captured["data"]
+
+
+def test_tts_escapes_xml_special_chars(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "test-key")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "eastus")
+
+    captured = {}
+
+    class FakeTtsResponse:
+        ok = True
+        status_code = 200
+        content = b"audio"
+        text = ""
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        captured["data"] = data
+        return FakeTtsResponse()
+
+    monkeypatch.setattr(target.requests, "post", fake_post)
+
+    response = client.post(
+        "/api/tts",
+        json={"text": "A < B & C > D", "voice": "en-us-June:MAI-Voice-1"},
+    )
+
+    assert response.status_code == 200
+    ssml = captured["data"].decode("utf-8")
+    assert "&lt;" in ssml
+    assert "&amp;" in ssml
+    assert "&gt;" in ssml
+    assert "< B" not in ssml
+
+
+def test_tts_endpoint_not_configured(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "test-key")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_TTS_ENDPOINT", "")
+
+    response = client.post(
+        "/api/tts",
+        json={"text": "Hello", "voice": "en-us-Jasper:MAI-Voice-1"},
+    )
+
+    assert response.status_code == 500
+    assert "not configured" in response.get_json()["error"]
+
+
+def test_tts_custom_endpoint(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "test-key")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "")
+    monkeypatch.setattr(
+        target,
+        "AZURE_SPEECH_TTS_ENDPOINT",
+        "https://custom.tts.endpoint/cognitiveservices/v1",
+    )
+
+    captured = {}
+
+    class FakeTtsResponse:
+        ok = True
+        status_code = 200
+        content = b"audio"
+        text = ""
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        captured["url"] = url
+        return FakeTtsResponse()
+
+    monkeypatch.setattr(target.requests, "post", fake_post)
+
+    response = client.post(
+        "/api/tts",
+        json={"text": "Hello", "voice": "en-us-Grant:MAI-Voice-1"},
+    )
+
+    assert response.status_code == 200
+    assert captured["url"] == "https://custom.tts.endpoint/cognitiveservices/v1"
+
+
+def test_tts_default_credential_no_resource_id(monkeypatch):
+    """When no key and no resource ID, uses plain Bearer token from DefaultAzureCredential."""
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "eastus")
+    monkeypatch.setattr(target, "AZURE_SPEECH_TTS_ENDPOINT", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_RESOURCE_ID", "")
+
+    class FakeToken:
+        token = "fake-aad-token"
+
+    monkeypatch.setattr(target.credential, "get_token", lambda scope: FakeToken())
+
+    class FakeTtsResponse:
+        ok = True
+        status_code = 200
+        content = b"audio-bytes"
+        text = ""
+
+    captured = {}
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        captured["headers"] = headers
+        return FakeTtsResponse()
+
+    monkeypatch.setattr(target.requests, "post", fake_post)
+
+    response = client.post(
+        "/api/tts",
+        json={"text": "Hello", "voice": "en-us-Jasper:MAI-Voice-1"},
+    )
+
+    assert response.status_code == 200
+    assert captured["headers"]["Authorization"] == "Bearer fake-aad-token"
+    assert "Ocp-Apim-Subscription-Key" not in captured["headers"]
+
+
+def test_tts_default_credential_with_resource_id(monkeypatch):
+    """When no key but resource ID is set, uses aad# token format."""
+    client = make_client()
+    monkeypatch.setattr(target, "AZURE_SPEECH_KEY", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_REGION", "eastus")
+    monkeypatch.setattr(target, "AZURE_SPEECH_TTS_ENDPOINT", "")
+    monkeypatch.setattr(target, "AZURE_SPEECH_RESOURCE_ID", "/subs/123/resource")
+
+    class FakeToken:
+        token = "fake-aad-token"
+
+    monkeypatch.setattr(target.credential, "get_token", lambda scope: FakeToken())
+
+    class FakeTtsResponse:
+        ok = True
+        status_code = 200
+        content = b"audio-bytes"
+        text = ""
+
+    captured = {}
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        captured["headers"] = headers
+        return FakeTtsResponse()
+
+    monkeypatch.setattr(target.requests, "post", fake_post)
+
+    response = client.post(
+        "/api/tts",
+        json={"text": "Hello", "voice": "en-us-Jasper:MAI-Voice-1"},
+    )
+
+    assert response.status_code == 200
+    assert captured["headers"]["Authorization"] == "Bearer aad#/subs/123/resource#fake-aad-token"
+    assert "Ocp-Apim-Subscription-Key" not in captured["headers"]

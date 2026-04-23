@@ -889,3 +889,113 @@ button:hover {
 .orchestration-config {
   margin-top: 0.5rem;
 }
+
+/* ── Sidebar settings button ─────────────────── */
+.sidebar-settings-row {
+  border-top: 1px solid var(--line);
+  padding: 0.4rem 0.55rem;
+  flex-shrink: 0;
+}
+
+.sidebar-settings-row button {
+  width: 100%;
+  padding: 0.35rem;
+  font-size: 0.75rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 400;
+}
+
+.sidebar-settings-row button:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* ── Settings modal ──────────────────────────── */
+.settings-body {
+  font-size: 0.85rem;
+}
+
+.settings-section {
+  border: 1px solid var(--line);
+  padding: 0.75rem;
+  margin: 0;
+}
+
+.settings-section legend {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.tts-unavailable {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.tts-unavailable code {
+  background: #f3f4f6;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.75rem;
+}
+
+.tts-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
+.tts-toggle-label input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+}
+
+.tts-voice-assignments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.tts-voice-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--line);
+  background: #f9fafb;
+}
+
+.tts-voice-row .agent-color-dot {
+  flex-shrink: 0;
+}
+
+.tts-voice-agent-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tts-voice-row select {
+  width: 160px;
+  font-size: 0.78rem;
+  padding: 0.25rem;
+}
+
+.tts-speaker-icon {
+  display: inline-block;
+  margin-left: 0.2rem;
+  font-size: 0.75rem;
+  cursor: default;
+  opacity: 0.6;
+}

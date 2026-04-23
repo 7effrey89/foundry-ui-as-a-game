@@ -12,7 +12,13 @@
     triageAgentId: '',
     managerAgentId: '',
     trace: [],
-    agents: []
+    agents: [],
+    tts: {
+      available: false,
+      enabled: false,
+      voices: [],
+      voiceMap: {}   // agentId -> voiceId
+    }
   };
 
   const API_BASE = '/api';
@@ -157,7 +163,14 @@
     sidebarFooter: document.getElementById('sidebarFooter'),
     metricsSummaryModal: document.getElementById('metricsSummaryModal'),
     metricsSummaryBody: document.getElementById('metricsSummaryBody'),
-    closeMetricsSummaryBtn: document.getElementById('closeMetricsSummaryBtn')
+    closeMetricsSummaryBtn: document.getElementById('closeMetricsSummaryBtn'),
+    openSettingsBtn: document.getElementById('openSettingsBtn'),
+    settingsModal: document.getElementById('settingsModal'),
+    closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+    ttsEnabled: document.getElementById('ttsEnabled'),
+    ttsSettings: document.getElementById('ttsSettings'),
+    ttsUnavailable: document.getElementById('ttsUnavailable'),
+    ttsVoiceAssignments: document.getElementById('ttsVoiceAssignments')
   };
 
   function setLog(message, color) {
@@ -371,6 +384,7 @@
       renderOffice();
       renderAgentsPanel();
       setLog(`${agent.name} responded.`);
+      speakText(response, agent.id);
     } catch (error) {
       stopThinking();
       setLog(error.message);
@@ -768,6 +782,7 @@
         addTraceEntries(agent, result, 'concurrent');
         renderOffice();
         renderAgentsPanel();
+        speakText(response, agent.id);
       } catch (error) {
         stopFns[i]();
         throw new Error(`Agent ${agent.name} failed: ${error.message}`);
@@ -810,6 +825,7 @@
         rollingMessage = buildSequentialHandoffMessage(message, response);
         renderOffice();
         renderAgentsPanel();
+        speakText(response, agent.id);
       } catch (error) {
         stopThinking();
         throw new Error(`Agent ${agent.name} failed: ${error.message}`);
@@ -845,6 +861,7 @@
         addTraceEntries(currentAgent, result, 'handoff');
         renderOffice();
         renderAgentsPanel();
+        speakText(response, currentAgent.id);
         const handoffMatch = response.match(/\[HANDOFF:([^\]]+)\]/i);
         if (handoffMatch) {
           const targetName = handoffMatch[1].trim();
@@ -899,6 +916,7 @@
           roundMessage = 'Continue the group discussion. Original task: ' + message;
           renderOffice();
           renderAgentsPanel();
+          speakText(response, agent.id);
         } catch (error) {
           stopThinking();
           throw new Error(`Agent ${agent.name} failed: ${error.message}`);
@@ -923,6 +941,7 @@
         addTraceEntries(managerAgent, result, 'magentic');
         renderOffice();
         renderAgentsPanel();
+        speakText(managerAgent.lastSpeech, managerAgent.id);
       } catch (error) {
         stopThinking();
         throw new Error(`Agent ${managerAgent.name} failed: ${error.message}`);
@@ -973,6 +992,7 @@
               addTraceEntries(worker, workerResult, 'magentic');
               renderOffice();
               renderAgentsPanel();
+              speakText(workerResponse, worker.id);
               context.push({ role: 'assistant', content: response });
               context.push({ role: 'user', content: 'Worker ' + worker.name + ' completed the task: ' + workerResponse });
               managerMessage = 'Worker ' + worker.name + ' responded: "' + workerResponse +
@@ -1072,6 +1092,26 @@
   });
   ids.metricsSummaryModal.addEventListener('click', (e) => {
     if (e.target === ids.metricsSummaryModal) ids.metricsSummaryModal.style.display = 'none';
+  });
+
+  // ── Settings modal ────────────────────────────
+  ids.openSettingsBtn.addEventListener('click', () => {
+    renderSettingsModal();
+    ids.settingsModal.style.display = 'flex';
+  });
+  ids.closeSettingsBtn.addEventListener('click', () => {
+    ids.settingsModal.style.display = 'none';
+  });
+  ids.settingsModal.addEventListener('click', (e) => {
+    if (e.target === ids.settingsModal) ids.settingsModal.style.display = 'none';
+  });
+  ids.ttsEnabled.addEventListener('change', () => {
+    state.tts.enabled = ids.ttsEnabled.checked;
+  });
+  ids.ttsVoiceAssignments.addEventListener('change', (e) => {
+    const select = e.target.closest('[data-voice-agent]');
+    if (!select) return;
+    state.tts.voiceMap[select.dataset.voiceAgent] = select.value;
   });
   ids.sidebarFooter.addEventListener('click', (e) => {
     if (e.target.closest('#openMetricsSummary')) showMetricsSummary();
@@ -1240,6 +1280,126 @@
     }
   }
 
+  // ── TTS Functions ─────────────────────────────
+  let _ttsAudioQueue = [];
+  let _ttsPlaying = false;
+
+  async function checkTtsStatus() {
+    try {
+      const result = await foundryRequest('/tts/status', 'GET');
+      state.tts.available = result?.available || false;
+      state.tts.voices = result?.voices || [];
+    } catch {
+      state.tts.available = false;
+      state.tts.voices = [];
+    }
+    renderSettingsModal();
+  }
+
+  function getVoiceForAgent(agentId) {
+    if (state.tts.voiceMap[agentId]) return state.tts.voiceMap[agentId];
+    // Auto-assign a distinct voice based on agent index
+    const idx = state.agents.findIndex((a) => a.id === agentId);
+    if (idx >= 0 && state.tts.voices.length) {
+      return state.tts.voices[idx % state.tts.voices.length].id;
+    }
+    return state.tts.voices.length ? state.tts.voices[0].id : '';
+  }
+
+  async function speakText(text, agentId) {
+    if (!state.tts.enabled || !state.tts.available) return;
+    const voice = getVoiceForAgent(agentId);
+    if (!voice) return;
+
+    // Truncate very long responses to keep TTS reasonable
+    const maxLen = 2000;
+    const ttsText = text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+
+    _ttsAudioQueue.push({ text: ttsText, voice, agentId });
+    if (!_ttsPlaying) _playNextTts();
+  }
+
+  async function _playNextTts() {
+    if (!_ttsAudioQueue.length) {
+      _ttsPlaying = false;
+      return;
+    }
+    _ttsPlaying = true;
+    const { text, voice, agentId } = _ttsAudioQueue.shift();
+    try {
+      const response = await fetch(`${API_BASE}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice })
+      });
+      if (!response.ok) {
+        _playNextTts();
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+
+      // Show speaker icon on the agent's bubble
+      const bubble = document.querySelector(`[data-agent-bubble="${agentId}"]`);
+      if (bubble && !bubble.querySelector('.tts-speaker-icon')) {
+        const icon = document.createElement('span');
+        icon.className = 'tts-speaker-icon';
+        icon.textContent = ' 🔊';
+        bubble.appendChild(icon);
+      }
+
+      audio.addEventListener('ended', () => {
+        URL.revokeObjectURL(url);
+        const icon = bubble?.querySelector('.tts-speaker-icon');
+        if (icon) icon.remove();
+        _playNextTts();
+      });
+      audio.addEventListener('error', () => {
+        URL.revokeObjectURL(url);
+        _playNextTts();
+      });
+      audio.play().catch(() => _playNextTts());
+    } catch {
+      _playNextTts();
+    }
+  }
+
+  function renderSettingsModal() {
+    if (!ids.ttsSettings || !ids.ttsUnavailable) return;
+    if (state.tts.available) {
+      ids.ttsUnavailable.style.display = 'none';
+      ids.ttsSettings.style.display = '';
+      ids.ttsEnabled.checked = state.tts.enabled;
+      renderVoiceAssignments();
+    } else {
+      ids.ttsUnavailable.style.display = '';
+      ids.ttsSettings.style.display = 'none';
+    }
+  }
+
+  function renderVoiceAssignments() {
+    if (!ids.ttsVoiceAssignments) return;
+    ids.ttsVoiceAssignments.innerHTML = '';
+    if (!state.tts.voices.length || !state.agents.length) {
+      ids.ttsVoiceAssignments.innerHTML = '<span class="status">Load agents first to assign voices.</span>';
+      return;
+    }
+
+    state.agents.forEach((agent) => {
+      const row = document.createElement('div');
+      row.className = 'tts-voice-row';
+      const color = getAgentColor(agent.id);
+      const currentVoice = getVoiceForAgent(agent.id);
+      let options = state.tts.voices.map((v) => {
+        const selected = v.id === currentVoice ? ' selected' : '';
+        return `<option value="${v.id}"${selected}>${esc(v.label)}</option>`;
+      }).join('');
+      row.innerHTML = `<span class="agent-color-dot" style="background:${color}"></span><span class="tts-voice-agent-name">${esc(agent.name)}</span><select data-voice-agent="${agent.id}">${options}</select>`;
+      ids.ttsVoiceAssignments.appendChild(row);
+    });
+  }
+
   ids.loadAgentsBtn.addEventListener('click', loadAgents);
   ids.workflowMode.addEventListener('change', () => {
     state.workflowMode = ids.workflowMode.value;
@@ -1377,4 +1537,5 @@
   renderOrchestrationInfo();
   populateAgentSelectors();
   loadAgents();
+  checkTtsStatus();
 })();

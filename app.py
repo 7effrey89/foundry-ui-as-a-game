@@ -17,8 +17,24 @@ load_dotenv(os.path.join(APP_ROOT, ".env"), override=True)
 FOUNDRY_SCOPE = os.getenv("FOUNDRY_SCOPE", "https://ai.azure.com")
 FOUNDRY_PROJECT_ENDPOINT = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").rstrip("/")
 FOUNDRY_MODEL_DEPLOYMENT = os.getenv("FOUNDRY_MODEL_DEPLOYMENT", "")
-FOUNDRY_API_VERSION = os.getenv("FOUNDRY_API_VERSION", "v1")
+FOUNDRY_API_VERSION = os.getenv("FOUNDRY_API_VERSION", "") or "v1"
 MAX_AUTH_RETRIES = 2
+
+# Azure Speech Service (MAI-Voice-1 TTS)
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "")
+AZURE_SPEECH_TTS_ENDPOINT = os.getenv("AZURE_SPEECH_TTS_ENDPOINT", "")
+AZURE_SPEECH_RESOURCE_ID = os.getenv("AZURE_SPEECH_RESOURCE_ID", "")
+AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID", "")
+
+TTS_VOICES = [
+    {"id": "en-us-Jasper:MAI-Voice-1", "label": "Jasper (Male)"},
+    {"id": "en-us-June:MAI-Voice-1", "label": "June (Female)"},
+    {"id": "en-us-Grant:MAI-Voice-1", "label": "Grant (Male)"},
+    {"id": "en-us-Iris:MAI-Voice-1", "label": "Iris (Female)"},
+    {"id": "en-us-Reed:MAI-Voice-1", "label": "Reed (Male)"},
+    {"id": "en-us-Joy:MAI-Voice-1", "label": "Joy (Female)"},
+]
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +406,135 @@ def send_message() -> Any:
 @app.get("/api/metrics")
 def get_metrics() -> Any:
     return jsonify(_agent_metrics)
+
+
+def _get_tts_endpoint() -> str:
+    """Build the MAI-Voice-1 TTS endpoint URL."""
+    if AZURE_SPEECH_TTS_ENDPOINT:
+        return AZURE_SPEECH_TTS_ENDPOINT.rstrip("/")
+    if AZURE_SPEECH_REGION:
+        return f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+    return ""
+
+
+def _get_tts_headers(output_format: str = "audio-48khz-96kbitrate-mono-mp3") -> Dict[str, str]:
+    """Build headers for MAI-Voice-1 TTS requests."""
+    headers: Dict[str, str] = {
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": output_format,
+        "User-Agent": "FoundryUI-Game",
+    }
+    if AZURE_SPEECH_KEY:
+        headers["Ocp-Apim-Subscription-Key"] = AZURE_SPEECH_KEY
+    else:
+        # Fall back to DefaultAzureCredential (same credential used for Foundry)
+        token = credential.get_token("https://cognitiveservices.azure.com/.default").token
+        if AZURE_SPEECH_RESOURCE_ID:
+            headers["Authorization"] = f"Bearer aad#{AZURE_SPEECH_RESOURCE_ID}#{token}"
+        else:
+            headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+@app.get("/api/tts/status")
+def tts_status() -> Any:
+    endpoint = _get_tts_endpoint()
+    # TTS is available whenever an endpoint can be resolved.
+    # Auth uses AZURE_SPEECH_KEY if set, otherwise DefaultAzureCredential.
+    return jsonify({
+        "available": bool(endpoint),
+        "voices": TTS_VOICES,
+    })
+
+
+@app.post("/api/tts")
+def synthesize_speech() -> Any:
+    data = request.get_json(force=True) or {}
+    text = (data.get("text") or "").strip()
+    voice = (data.get("voice") or "").strip()
+
+    if not text:
+        return jsonify({"error": "text is required."}), 400
+    if not voice:
+        return jsonify({"error": "voice is required."}), 400
+
+    # Validate voice against known list
+    valid_ids = {v["id"] for v in TTS_VOICES}
+    if voice not in valid_ids:
+        return jsonify({"error": f"Unknown voice: {voice}"}), 400
+
+    endpoint = _get_tts_endpoint()
+    if not endpoint:
+        return jsonify({"error": "TTS endpoint is not configured."}), 500
+
+    # Escape XML special characters in text
+    safe_text = (text
+                 .replace("&", "&amp;")
+                 .replace("<", "&lt;")
+                 .replace(">", "&gt;")
+                 .replace('"', "&quot;")
+                 .replace("'", "&apos;"))
+
+    ssml = (
+        '<speak version="1.0" '
+        'xmlns="http://www.w3.org/2001/10/synthesis" '
+        'xml:lang="en-US">'
+        f'<voice name="{voice}">'
+        f'{safe_text}'
+        '</voice>'
+        '</speak>'
+    )
+
+    try:
+        headers = _get_tts_headers()
+    except (ValueError, Exception) as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    try:
+        tts_response = requests.post(
+            endpoint,
+            headers=headers,
+            data=ssml.encode("utf-8"),
+            timeout=60,
+        )
+
+        # Retry with DefaultAzureCredential if key auth returns 401/403
+        if (
+            tts_response.status_code in (401, 403)
+            and headers.get("Ocp-Apim-Subscription-Key")
+        ):
+            try:
+                fallback_headers = {
+                    "Content-Type": "application/ssml+xml",
+                    "X-Microsoft-OutputFormat": "audio-48khz-96kbitrate-mono-mp3",
+                    "User-Agent": "FoundryUI-Game",
+                }
+                token = credential.get_token("https://cognitiveservices.azure.com/.default").token
+                if AZURE_SPEECH_RESOURCE_ID:
+                    fallback_headers["Authorization"] = f"Bearer aad#{AZURE_SPEECH_RESOURCE_ID}#{token}"
+                else:
+                    fallback_headers["Authorization"] = f"Bearer {token}"
+                tts_response = requests.post(
+                    endpoint,
+                    headers=fallback_headers,
+                    data=ssml.encode("utf-8"),
+                    timeout=60,
+                )
+            except Exception:
+                pass
+
+        if not tts_response.ok:
+            return jsonify({"error": f"TTS API error {tts_response.status_code}: {tts_response.text[:300]}"}), 502
+
+        from flask import Response
+        return Response(
+            tts_response.content,
+            mimetype="audio/mpeg",
+            headers={"Content-Type": "audio/mpeg"},
+        )
+
+    except Exception as exc:
+        return jsonify({"error": f"TTS request failed: {exc}"}), 502
 
 
 @app.errorhandler(Exception)
