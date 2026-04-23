@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Foundry UI as a Game</title>
     <link rel="stylesheet" href="/styles.css" />
-    <script src="https://alcdn.msauth.net/browser/2.39.0/js/msal-browser.min.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -16,18 +15,26 @@
       </header>
 
       <section class="panel auth-panel">
-        <h2>1) Entra Authentication (No API Keys)</h2>
+        <h2>1) Server Configuration</h2>
+        <p class="status">
+          This app now authenticates with Azure using DefaultAzureCredential on the Flask server.
+        </p>
         <div class="grid two-col">
-          <label>Tenant ID <input id="tenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></label>
-          <label>Client ID <input id="clientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" /></label>
-          <label>Foundry Scope <input id="scope" value="https://cognitiveservices.azure.com/.default" /></label>
-          <label>Project Endpoint <input id="projectEndpoint" placeholder="https://<resource>.services.ai.azure.com/api/projects/<project>" /></label>
-          <label>Model Deployment <input id="modelDeployment" placeholder="e.g. gpt-4o-mini" /></label>
-          <label>API Version <input id="apiVersion" value="2024-05-01-preview" /></label>
-        </div>
-        <div class="row">
-          <button id="loginBtn">Login with Entra</button>
-          <span id="authStatus" class="status">Not signed in</span>
+          <div>
+            <strong>Required env vars</strong>
+            <ul>
+              <li>FOUNDRY_PROJECT_ENDPOINT</li>
+              <li>FOUNDRY_MODEL_DEPLOYMENT</li>
+              <li>FOUNDRY_API_VERSION (optional)</li>
+            </ul>
+          </div>
+          <div>
+            <strong>Auth options</strong>
+            <ul>
+              <li>Azure CLI: <code>az login</code></li>
+              <li>Managed Identity / Workload Identity</li>
+            </ul>
+          </div>
         </div>
       </section>
 

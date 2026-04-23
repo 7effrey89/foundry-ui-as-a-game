@@ -9,7 +9,7 @@ A browser-based, pixel-styled office UI for visually demonstrating Azure AI Foun
 - NPC creation from the UI that creates an Azure AI Foundry Agent
   - NPC name -> agent name
   - NPC description -> agent system prompt/instructions
-- Entra ID authentication via MSAL (no API key inputs and no API-key auth path)
+- Entra ID authentication via Azure DefaultAzureCredential on the Flask server (no API key inputs and no API-key auth path)
 - Message routing to agents with workflow strategies:
   - **Group**: all enabled agents respond
   - **Sequential**: enabled agents respond in order
@@ -20,25 +20,48 @@ A browser-based, pixel-styled office UI for visually demonstrating Azure AI Foun
 
 ## Run locally
 
-Because this is a static app, you can run it with a simple local web server:
+This app now runs with a Flask backend for server-side authentication.
 
 ```bash
 cd foundry-ui-as-a-game
-python3 -m http.server 4173
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Set environment variables for Foundry (or edit the `.env` file in the repo root; it is loaded automatically on startup):
+
+```bash
+export FOUNDRY_PROJECT_ENDPOINT="https://<resource>.services.ai.azure.com/api/projects/<project>"
+export FOUNDRY_MODEL_DEPLOYMENT="gpt-4o-mini"
+export FOUNDRY_API_VERSION="2024-05-01-preview"
+```
+
+PowerShell:
+
+```powershell
+$env:FOUNDRY_PROJECT_ENDPOINT="https://<resource>.services.ai.azure.com/api/projects/<project>"
+$env:FOUNDRY_MODEL_DEPLOYMENT="gpt-4o-mini"
+$env:FOUNDRY_API_VERSION="2024-05-01-preview"
+```
+
+Authenticate with Azure (one of the supported DefaultAzureCredential methods):
+
+```bash
+az login
+```
+
+Run the server:
+
+```bash
+python app.py
 ```
 
 Open `http://localhost:4173` in a browser.
 
 ## Configure in UI
 
-1. Enter **Tenant ID** and **Client ID** for your Entra app registration.
-2. Enter Foundry scope (default: `https://cognitiveservices.azure.com/.default`).
-3. Enter Foundry **Project Endpoint**.
-4. Enter **Model Deployment** used for agent creation.
-5. Keep/update **API Version**.
-6. Click **Login with Entra**.
-
-After login:
+After the server is running and authenticated:
 - Create NPCs (which creates Foundry agents)
 - Pick workflow mode (group/sequential)
 - Send messages and watch bubbles over each character

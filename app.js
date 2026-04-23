@@ -1,8 +1,4 @@
 (() => {
-  const MAX_RUN_POLL_ATTEMPTS = 15;
-  const RUN_POLL_INTERVAL_MS = 1000;
-  const RUN_POLL_TIMEOUT_MS = MAX_RUN_POLL_ATTEMPTS * RUN_POLL_INTERVAL_MS;
-
   const state = {
     user: {
       name: 'You',
@@ -10,11 +6,10 @@
       deskIndex: 0
     },
     workflowMode: 'group',
-    agents: [],
-    msalInstance: null,
-    account: null,
-    accessToken: null
+    agents: []
   };
+
+  const API_BASE = '/api';
 
   const DESKS = [
     { x: 90, y: 90 },
@@ -26,14 +21,6 @@
   ];
 
   const ids = {
-    tenantId: document.getElementById('tenantId'),
-    clientId: document.getElementById('clientId'),
-    scope: document.getElementById('scope'),
-    projectEndpoint: document.getElementById('projectEndpoint'),
-    modelDeployment: document.getElementById('modelDeployment'),
-    apiVersion: document.getElementById('apiVersion'),
-    loginBtn: document.getElementById('loginBtn'),
-    authStatus: document.getElementById('authStatus'),
     npcName: document.getElementById('npcName'),
     npcDescription: document.getElementById('npcDescription'),
     createNpcBtn: document.getElementById('createNpcBtn'),
@@ -56,67 +43,10 @@
     return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  function settings() {
-    return {
-      tenantId: ids.tenantId.value.trim(),
-      clientId: ids.clientId.value.trim(),
-      scope: ids.scope.value.trim(),
-      projectEndpoint: ids.projectEndpoint.value.trim().replace(/\/$/, ''),
-      modelDeployment: ids.modelDeployment.value.trim(),
-      apiVersion: ids.apiVersion.value.trim()
-    };
-  }
-
-  async function ensureAuth() {
-    const s = settings();
-    if (!s.tenantId || !s.clientId || !s.scope) {
-      throw new Error('Tenant ID, Client ID and scope are required for Entra sign-in.');
-    }
-
-    if (!window.msal || !window.msal.PublicClientApplication) {
-      throw new Error('MSAL library failed to load.');
-    }
-
-    if (!state.msalInstance) {
-      state.msalInstance = new window.msal.PublicClientApplication({
-        auth: {
-          clientId: s.clientId,
-          authority: `https://login.microsoftonline.com/${s.tenantId}`,
-          redirectUri: window.location.origin + window.location.pathname
-        },
-        cache: {
-          cacheLocation: 'sessionStorage'
-        }
-      });
-      await state.msalInstance.initialize();
-    }
-
-    if (!state.account) {
-      const loginResult = await state.msalInstance.loginPopup({ scopes: [s.scope] });
-      state.account = loginResult.account;
-    }
-
-    const token = await state.msalInstance.acquireTokenSilent({
-      account: state.account,
-      scopes: [s.scope]
-    }).catch(async () => state.msalInstance.acquireTokenPopup({ scopes: [s.scope] }));
-
-    state.accessToken = token.accessToken;
-    ids.authStatus.textContent = `Signed in as ${state.account.username || state.account.name || 'user'}`;
-    return state.accessToken;
-  }
-
   async function foundryRequest(path, method, body) {
-    const s = settings();
-    if (!s.projectEndpoint || !s.apiVersion) {
-      throw new Error('Project endpoint and API version are required.');
-    }
-
-    const token = await ensureAuth();
-    const response = await fetch(`${s.projectEndpoint}${path}${path.includes('?') ? '&' : '?'}api-version=${encodeURIComponent(s.apiVersion)}`, {
+    const response = await fetch(`${API_BASE}${path}`, {
       method,
       headers: {
-        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: body ? JSON.stringify(body) : undefined
@@ -124,7 +54,7 @@
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Foundry API error ${response.status}: ${text}`);
+      throw new Error(`Server error ${response.status}: ${text}`);
     }
 
     const contentType = response.headers.get('content-type') || '';
@@ -132,51 +62,20 @@
   }
 
   async function createFoundryAgent(name, description) {
-    const s = settings();
-    if (!s.modelDeployment) {
-      throw new Error('Model deployment is required to create agents.');
-    }
-
     const result = await foundryRequest('/agents', 'POST', {
       name,
-      model: s.modelDeployment,
       instructions: description
     });
 
-    return result.id;
+    return { id: result.id, name: result.name || name };
   }
 
   async function sendMessageToFoundryAgent(agent, message) {
-    const thread = await foundryRequest('/threads', 'POST', {});
-    await foundryRequest(`/threads/${thread.id}/messages`, 'POST', {
-      role: 'user',
-      content: message
+    const result = await foundryRequest('/messages', 'POST', {
+      agentName: agent.foundryAgentName,
+      message
     });
-
-    const run = await foundryRequest(`/threads/${thread.id}/runs`, 'POST', {
-      assistant_id: agent.foundryAgentId
-    });
-
-    let completed = false;
-    for (let i = 0; i < MAX_RUN_POLL_ATTEMPTS; i += 1) {
-      const runStatus = await foundryRequest(`/threads/${thread.id}/runs/${run.id}`, 'GET');
-      if (runStatus.status === 'completed') {
-        completed = true;
-        break;
-      }
-      if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
-        throw new Error(`Run ended with status: ${runStatus.status}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, RUN_POLL_INTERVAL_MS));
-    }
-    if (!completed) {
-      throw new Error(`${agent.name} timed out after ${RUN_POLL_TIMEOUT_MS / 1000} seconds.`);
-    }
-
-    const messages = await foundryRequest(`/threads/${thread.id}/messages?order=desc`, 'GET');
-    const assistantMessage = (messages.data || []).find((m) => m.role === 'assistant');
-    const textValue = assistantMessage?.content?.[0]?.text?.value;
-    return textValue || 'No response received from agent.';
+    return result?.response || 'No response received from agent.';
   }
 
   function getDeskForAgent(index) {
@@ -266,12 +165,13 @@
 
     try {
       setLog(`Creating Foundry agent "${name}"...`);
-      const foundryAgentId = await createFoundryAgent(name, description);
+      const foundryAgent = await createFoundryAgent(name, description);
       state.agents.push({
         id: createLocalId(),
         name,
         description,
-        foundryAgentId,
+        foundryAgentId: foundryAgent.id,
+        foundryAgentName: foundryAgent.name,
         enabled: true,
         lastSpeech: 'Ready to help!'
       });
@@ -341,15 +241,6 @@
       setLog(error.message);
     }
   }
-
-  ids.loginBtn.addEventListener('click', async () => {
-    try {
-      await ensureAuth();
-      setLog('Authentication complete.');
-    } catch (error) {
-      setLog(error.message);
-    }
-  });
 
   ids.createNpcBtn.addEventListener('click', handleCreateNpc);
   ids.sendMessageBtn.addEventListener('click', handleSendMessage);
