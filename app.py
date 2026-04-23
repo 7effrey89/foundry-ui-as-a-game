@@ -22,6 +22,76 @@ credential = DefaultAzureCredential()
 app = Flask(__name__)
 
 
+def _extract_response_text(result: Dict[str, Any]) -> str:
+    output_text = result.get("output_text", "")
+    if output_text:
+        return output_text
+
+    output = result.get("output", [])
+    for item in output:
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if content.get("type") == "output_text":
+                output_text = content.get("text", "")
+                if output_text:
+                    return output_text
+    return ""
+
+
+def _build_trace_entries(result: Dict[str, Any]) -> list[Dict[str, Any]]:
+    trace: list[Dict[str, Any]] = []
+    for item in result.get("output", []):
+        item_type = item.get("type", "event")
+        if item_type == "message":
+            for content in item.get("content", []):
+                if content.get("type") == "output_text":
+                    text = content.get("text", "")
+                    if text:
+                        trace.append(
+                            {
+                                "type": "message_output",
+                                "summary": f"Agent response chunk: {text[:120]}",
+                                "text": text,
+                            }
+                        )
+        elif item_type == "reasoning":
+            summary_items = item.get("summary", [])
+            summary_text = " ".join(
+                s.get("text", "").strip()
+                for s in summary_items
+                if isinstance(s, dict) and s.get("text")
+            ).strip()
+            if summary_text:
+                trace.append(
+                    {
+                        "type": "reasoning",
+                        "summary": f"Reasoning summary: {summary_text[:120]}",
+                        "text": summary_text,
+                    }
+                )
+        elif item_type == "mcp_approval_request":
+            server = item.get("server_label", "unknown")
+            name = item.get("name", "tool")
+            trace.append(
+                {
+                    "type": "tool_approval_request",
+                    "summary": f"Tool approval requested: {server}.{name}",
+                    "server": server,
+                    "name": name,
+                    "approval_request_id": item.get("id", ""),
+                }
+            )
+        elif item_type.startswith("mcp_"):
+            trace.append(
+                {
+                    "type": item_type,
+                    "summary": f"Tool event: {item_type}",
+                }
+            )
+    return trace
+
+
 def foundry_request(path: str, method: str, body: Optional[Dict[str, Any]] = None) -> Any:
     if not FOUNDRY_PROJECT_ENDPOINT:
         raise ValueError("FOUNDRY_PROJECT_ENDPOINT is required.")
@@ -172,6 +242,15 @@ def send_message() -> Any:
         },
     )
 
+    trace = [
+        {
+            "type": "input",
+            "summary": f"User message sent to {agent_name}: {message[:120]}",
+            "text": message,
+        }
+    ]
+    trace.extend(_build_trace_entries(result))
+
     # Auto-approve MCP tool calls (knowledge base, etc.) up to 5 rounds
     for _ in range(5):
         approvals = [
@@ -181,6 +260,15 @@ def send_message() -> Any:
         ]
         if not approvals:
             break
+        for approval in approvals:
+            trace.append(
+                {
+                    "type": "tool_approval_response",
+                    "summary": f"Tool approval granted: {approval['approval_request_id']}",
+                    "approval_request_id": approval["approval_request_id"],
+                    "approve": True,
+                }
+            )
         result = foundry_request(
             "/openai/v1/responses",
             "POST",
@@ -194,20 +282,24 @@ def send_message() -> Any:
                 "input": approvals,
             },
         )
+        trace.extend(_build_trace_entries(result))
 
-    output_text = result.get("output_text", "")
-    if not output_text:
-        output = result.get("output", [])
-        for item in output:
-            if item.get("type") == "message":
-                for content in item.get("content", []):
-                    if content.get("type") == "output_text":
-                        output_text = content.get("text", "")
-                        break
-                if output_text:
-                    break
+    output_text = _extract_response_text(result)
+    if output_text:
+        trace.append(
+            {
+                "type": "final_response",
+                "summary": f"Final response: {output_text[:120]}",
+                "text": output_text,
+            }
+        )
 
-    return jsonify({"response": output_text or "No response received from agent."})
+    return jsonify(
+        {
+            "response": output_text or "No response received from agent.",
+            "trace": trace,
+        }
+    )
 
 
 @app.errorhandler(Exception)

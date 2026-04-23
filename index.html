@@ -58,6 +58,12 @@
                 <option value="sequential">Sequential (enabled agents respond in order)</option>
               </select>
             </label>
+            <label>Sequential handoff
+              <select id="handoffMode">
+                <option value="previous_response">Pass previous response only</option>
+                <option value="append_history">Append prior context and response</option>
+              </select>
+            </label>
             <small>Disabled agents go to sleep at their desk.</small>
             <button id="loadAgentsBtn" style="margin-top:0.5rem">Load Existing Foundry Agents</button>
           </fieldset>
@@ -68,7 +74,18 @@
           <button id="sendMessageBtn">Speak to All</button>
         </div>
 
-        <div id="agentList" class="agent-list"></div>
+        <div class="control-layout">
+          <div>
+            <div id="agentList" class="agent-list"></div>
+          </div>
+          <aside class="trace-sidebar">
+            <div class="trace-head">
+              <strong>Agent Trace</strong>
+              <button id="clearTraceBtn" type="button">Clear</button>
+            </div>
+            <div id="traceList" class="trace-list"></div>
+          </aside>
+        </div>
         <p id="eventLog" class="log"></p>
       </section>
 

@@ -6,6 +6,8 @@
       deskIndex: 0
     },
     workflowMode: 'group',
+    handoffMode: 'previous_response',
+    trace: [],
     agents: []
   };
 
@@ -58,11 +60,14 @@
     createNpcBtn: document.getElementById('createNpcBtn'),
     loadAgentsBtn: document.getElementById('loadAgentsBtn'),
     workflowMode: document.getElementById('workflowMode'),
+    handoffMode: document.getElementById('handoffMode'),
     userMessage: document.getElementById('userMessage'),
     sendMessageBtn: document.getElementById('sendMessageBtn'),
     agentList: document.getElementById('agentList'),
     office: document.getElementById('office'),
-    eventLog: document.getElementById('eventLog')
+    eventLog: document.getElementById('eventLog'),
+    traceList: document.getElementById('traceList'),
+    clearTraceBtn: document.getElementById('clearTraceBtn')
   };
 
   function setLog(message) {
@@ -114,11 +119,10 @@
   }
 
   async function sendMessageToFoundryAgent(agent, message) {
-    const result = await foundryRequest('/messages', 'POST', {
+    return foundryRequest('/messages', 'POST', {
       agentName: agent.foundryAgentName,
       message
     });
-    return result?.response || 'No response received from agent.';
   }
 
   async function fetchAgents() {
@@ -145,9 +149,11 @@
 
     const stopThinking = startThinking(agent.id);
     try {
-      const response = await sendMessageToFoundryAgent(agent, message);
+      const result = await sendMessageToFoundryAgent(agent, message);
       stopThinking();
+      const response = result?.response || 'No response received from agent.';
       agent.lastSpeech = response;
+      addTraceEntries(agent, result, 'direct');
       renderOffice();
       renderAgentsPanel();
       setLog(`${agent.name} responded.`);
@@ -159,6 +165,95 @@
 
   function getDeskForAgent(index) {
     return DESKS[(index + 1) % DESKS.length];
+  }
+
+  function shortText(value, max = 140) {
+    if (!value) return '';
+    if (value.length <= max) return value;
+    return `${value.slice(0, max)}...`;
+  }
+
+  function formatTime(date = new Date()) {
+    return date.toLocaleTimeString();
+  }
+
+  function renderTracePanel() {
+    if (!ids.traceList) return;
+    ids.traceList.innerHTML = '';
+    if (!state.trace.length) {
+      const empty = document.createElement('p');
+      empty.className = 'status';
+      empty.textContent = 'No trace events yet.';
+      ids.traceList.appendChild(empty);
+      return;
+    }
+
+    state.trace.forEach((entry) => {
+      const item = document.createElement('article');
+      item.className = 'trace-item';
+
+      const meta = document.createElement('div');
+      meta.className = 'trace-meta';
+      meta.textContent = `${entry.time} • ${entry.agentName} • ${entry.type}`;
+
+      const summary = document.createElement('div');
+      summary.className = 'trace-summary';
+      summary.textContent = entry.summary;
+
+      item.appendChild(meta);
+      item.appendChild(summary);
+      ids.traceList.appendChild(item);
+    });
+  }
+
+  function addTrace(entry) {
+    state.trace.push({
+      time: formatTime(),
+      ...entry
+    });
+    if (state.trace.length > 300) {
+      state.trace = state.trace.slice(state.trace.length - 300);
+    }
+    renderTracePanel();
+  }
+
+  function addTraceEntries(agent, result, channel) {
+    const traceEntries = Array.isArray(result?.trace) ? result.trace : [];
+    if (!traceEntries.length) {
+      return;
+    }
+
+    traceEntries.forEach((entry) => {
+      addTrace({
+        agentName: agent.name,
+        agentId: agent.id,
+        type: entry.type || channel,
+        summary: entry.summary || shortText(entry.text || '')
+      });
+    });
+
+    let latestForBubble = null;
+    for (let i = traceEntries.length - 1; i >= 0; i -= 1) {
+      const entry = traceEntries[i];
+      if (entry.type === 'tool_approval_request' || entry.type === 'tool_approval_response' || entry.type === 'reasoning') {
+        latestForBubble = entry;
+        break;
+      }
+    }
+    if (!latestForBubble) {
+      latestForBubble = traceEntries[traceEntries.length - 1];
+    }
+    const bubbleSummary = latestForBubble?.summary || latestForBubble?.text || '';
+    if (bubbleSummary) {
+      agent.bubbleSpeech = shortText(bubbleSummary, 70);
+    }
+  }
+
+  function buildSequentialHandoffMessage(initialMessage, previousAgentResponse) {
+    if (state.handoffMode === 'append_history') {
+      return `${initialMessage}\n\nPrevious agent response: ${previousAgentResponse}`;
+    }
+    return `Previous agent response: ${previousAgentResponse}`;
   }
 
   function renderAgentsPanel() {
@@ -256,7 +351,7 @@
     state.agents.forEach((agent, index) => {
       const desk = getDeskForAgent(index);
       const spriteClass = agent.enabled ? 'awake' : 'nap';
-      const bubble = agent.enabled ? agent.lastSpeech : 'Zzz...';
+      const bubble = agent.enabled ? (agent.bubbleSpeech || agent.lastSpeech) : 'Zzz...';
       scene.appendChild(createDeskElement(desk, agent.name, spriteClass, bubble, agent.id));
     });
 
@@ -285,13 +380,14 @@
         foundryAgentId: foundryAgent.id,
         foundryAgentName: foundryAgent.name,
         enabled: true,
-        lastSpeech: 'Ready to help!'
+        lastSpeech: 'Ready to help!',
+        bubbleSpeech: ''
       });
       ids.npcName.value = '';
       ids.npcDescription.value = '';
       renderAgentsPanel();
       renderOffice();
-      setLog(`Created NPC "${name}" (Foundry ID: ${foundryAgentId}).`);
+      setLog(`Created NPC "${name}" (Foundry ID: ${foundryAgent.id}).`);
     } catch (error) {
       setLog(error.message);
     }
@@ -307,10 +403,20 @@
     if (state.workflowMode === 'group') {
       const stopFns = enabledAgents.map((agent) => startThinking(agent.id));
       const results = await Promise.allSettled(enabledAgents.map(async (agent, i) => {
+        addTrace({
+          agentName: agent.name,
+          agentId: agent.id,
+          type: 'workflow_dispatch',
+          summary: `Group dispatch: "${shortText(message)}"`
+        });
         try {
-          const response = await sendMessageToFoundryAgent(agent, message);
+          const result = await sendMessageToFoundryAgent(agent, message);
           stopFns[i]();
+          const response = result?.response || 'No response received from agent.';
           agent.lastSpeech = response;
+          addTraceEntries(agent, result, 'group');
+          renderOffice();
+          renderAgentsPanel();
         } catch (error) {
           stopFns[i]();
           throw new Error(`Agent ${agent.name} failed in group workflow: ${error.message}`);
@@ -331,11 +437,21 @@
     let rollingMessage = message;
     for (const agent of enabledAgents) {
       const stopThinking = startThinking(agent.id);
+      addTrace({
+        agentName: agent.name,
+        agentId: agent.id,
+        type: 'handoff_in',
+        summary: `Sequential handoff (${state.handoffMode}): "${shortText(rollingMessage)}"`
+      });
       try {
-        const response = await sendMessageToFoundryAgent(agent, rollingMessage);
+        const result = await sendMessageToFoundryAgent(agent, rollingMessage);
         stopThinking();
+        const response = result?.response || 'No response received from agent.';
         agent.lastSpeech = response;
-        rollingMessage = `Previous agent response: ${response}`;
+        addTraceEntries(agent, result, 'sequential');
+        rollingMessage = buildSequentialHandoffMessage(message, response);
+        renderOffice();
+        renderAgentsPanel();
       } catch (error) {
         stopThinking();
         throw new Error(`Agent ${agent.name} failed in sequential workflow: ${error.message}`);
@@ -352,6 +468,12 @@
     state.user.speech = message;
     renderOffice();
     setLog(`You said: "${message}"`);
+    addTrace({
+      agentName: state.user.name,
+      agentId: 'user',
+      type: 'user_message',
+      summary: message
+    });
 
     try {
       await processMessageThroughWorkflow(message);
@@ -380,19 +502,20 @@
           (a) => a.foundryAgentId === ra.id || a.foundryAgentName === ra.name
         );
         if (!alreadyExists) {
-          state.agents.push({
+      state.agents.push({
             id: createLocalId(),
             name: ra.name,
             description: '',
             foundryAgentId: ra.id,
             foundryAgentName: ra.name,
-            tools: ra.tools || [],
-            knowledge: ra.knowledge || [],
-            memory: ra.memory || [],
-            guardrail: ra.guardrail || '',
-            enabled: true,
-            lastSpeech: 'Ready to help!'
-          });
+        tools: ra.tools || [],
+        knowledge: ra.knowledge || [],
+        memory: ra.memory || [],
+        guardrail: ra.guardrail || '',
+        enabled: true,
+        lastSpeech: 'Ready to help!',
+        bubbleSpeech: ''
+      });
           added += 1;
         }
       });
@@ -408,6 +531,15 @@
   ids.workflowMode.addEventListener('change', () => {
     state.workflowMode = ids.workflowMode.value;
     setLog(`Workflow set to ${state.workflowMode}.`);
+  });
+  ids.handoffMode.addEventListener('change', () => {
+    state.handoffMode = ids.handoffMode.value;
+    setLog(`Sequential handoff set to ${state.handoffMode}.`);
+  });
+
+  ids.clearTraceBtn.addEventListener('click', () => {
+    state.trace = [];
+    renderTracePanel();
   });
 
   ids.agentList.addEventListener('change', (event) => {
@@ -445,5 +577,6 @@
 
   renderAgentsPanel();
   renderOffice();
+  renderTracePanel();
   loadAgents();
 })();

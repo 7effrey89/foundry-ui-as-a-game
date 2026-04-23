@@ -362,6 +362,7 @@ def test_send_message_uses_responses_api(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["response"] == "Hello from the agent!"
+    assert response.get_json()["trace"][0]["type"] == "input"
     assert captured["path"] == "/openai/v1/responses"
     assert captured["body"]["agent_reference"]["type"] == "agent_reference"
     assert captured["body"]["agent_reference"]["name"] == "Jaime"
@@ -444,6 +445,9 @@ def test_send_message_auto_approves_mcp_tools(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["response"] == "Here is the answer from the KB."
+    trace = response.get_json()["trace"]
+    assert any(item["type"] == "tool_approval_request" for item in trace)
+    assert any(item["type"] == "tool_approval_response" for item in trace)
     assert call_count["n"] == 2
     approval_body = captured_calls[1]
     assert approval_body["previous_response_id"] == "resp_1"
@@ -452,6 +456,33 @@ def test_send_message_auto_approves_mcp_tools(monkeypatch):
     assert approval_body["input"][0]["type"] == "mcp_approval_response"
     assert approval_body["input"][0]["approve"] is True
     assert approval_body["input"][0]["approval_request_id"] == "mcpr_1"
+
+
+def test_send_message_returns_reasoning_trace(monkeypatch):
+    client = make_client()
+
+    def fake_foundry_request(path, method, body=None):
+        return {
+            "id": "resp_1",
+            "output_text": "Done.",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "Used policy and tool routing."}],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.post(
+        "/api/messages",
+        json={"agentName": "r", "message": "go"},
+    )
+
+    assert response.status_code == 200
+    trace = response.get_json()["trace"]
+    assert any(item["type"] == "reasoning" for item in trace)
 
 
 # --- Assets route tests ---

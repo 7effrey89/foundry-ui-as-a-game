@@ -13,10 +13,12 @@ A browser-based, pixel-styled office UI for visually demonstrating Azure AI Foun
 - Message routing to agents with workflow strategies:
   - **Group**: all enabled agents respond
   - **Sequential**: enabled agents respond in order
+  - Configurable sequential handoff mode (`previous_response` or `append_history`)
 - Agent enable/disable:
   - enabled = online at desk
   - disabled = sleeping/nap state at desk
   - unassigned desks remain empty
+- Real-time observability with per-agent bubble snippets and a right-side chronological trace panel
 
 ## Run locally
 
@@ -64,4 +66,6 @@ Open `http://localhost:4173` in a browser.
 After the server is running and authenticated:
 - Create NPCs (which creates Foundry agents)
 - Pick workflow mode (group/sequential)
+- Configure sequential handoff mode
 - Send messages and watch bubbles over each character
+- Inspect full chronological trace events in the right-side Agent Trace panel
