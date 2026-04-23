@@ -413,6 +413,47 @@ def test_send_message_no_response(monkeypatch):
     assert response.get_json()["response"] == "No response received from agent."
 
 
+def test_send_message_auto_approves_mcp_tools(monkeypatch):
+    """When the agent requests MCP tool approval, the backend auto-approves."""
+    client = make_client()
+    call_count = {"n": 0}
+    captured_calls = []
+
+    def fake_foundry_request(path, method, body=None):
+        captured_calls.append(body)
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return {
+                "id": "resp_1",
+                "model": "gpt-4.1",
+                "output_text": "",
+                "output": [
+                    {"type": "mcp_list_tools", "id": "mcpl_1"},
+                    {"type": "mcp_approval_request", "id": "mcpr_1",
+                     "server_label": "kb_demo", "name": "knowledge_base_retrieve"},
+                ],
+            }
+        return {"id": "resp_2", "output_text": "Here is the answer from the KB."}
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.post(
+        "/api/messages",
+        json={"agentName": "k", "message": "tell me about cph"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["response"] == "Here is the answer from the KB."
+    assert call_count["n"] == 2
+    approval_body = captured_calls[1]
+    assert approval_body["previous_response_id"] == "resp_1"
+    assert approval_body["model"] == "gpt-4.1"
+    assert approval_body["agent_reference"]["name"] == "k"
+    assert approval_body["input"][0]["type"] == "mcp_approval_response"
+    assert approval_body["input"][0]["approve"] is True
+    assert approval_body["input"][0]["approval_request_id"] == "mcpr_1"
+
+
 # --- Assets route tests ---
 
 

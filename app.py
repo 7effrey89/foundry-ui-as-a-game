@@ -172,6 +172,29 @@ def send_message() -> Any:
         },
     )
 
+    # Auto-approve MCP tool calls (knowledge base, etc.) up to 5 rounds
+    for _ in range(5):
+        approvals = [
+            {"type": "mcp_approval_response", "approve": True, "approval_request_id": item["id"]}
+            for item in result.get("output", [])
+            if item.get("type") == "mcp_approval_request"
+        ]
+        if not approvals:
+            break
+        result = foundry_request(
+            "/openai/v1/responses",
+            "POST",
+            {
+                "model": result.get("model", ""),
+                "agent_reference": {
+                    "type": "agent_reference",
+                    "name": agent_name,
+                },
+                "previous_response_id": result["id"],
+                "input": approvals,
+            },
+        )
+
     output_text = result.get("output_text", "")
     if not output_text:
         output = result.get("output", [])
