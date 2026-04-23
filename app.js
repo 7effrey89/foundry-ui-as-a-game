@@ -20,6 +20,38 @@
     { x: 560, y: 420 }
   ];
 
+  const THINKING_PHRASES = [
+    'Thinking...', 'Looking at tools...',
+    'Searching knowledge base...', 'Processing...',
+    'Reading documents...', 'Analyzing...',
+    'Consulting sources...', 'Hmm...',
+    'Let me check...', 'One moment...'
+  ];
+
+  const DOT_SEQUENCE = ['.', '..', '...'];
+
+  function startThinking(agentId) {
+    let tick = 0;
+    const update = () => {
+      const dotIndex = tick % (DOT_SEQUENCE.length + 1);
+      const phrase = dotIndex < DOT_SEQUENCE.length
+        ? DOT_SEQUENCE[dotIndex]
+        : THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)];
+      tick++;
+      const bubble = document.querySelector(`[data-agent-bubble="${agentId}"]`);
+      if (bubble) { bubble.textContent = phrase; bubble.classList.add('thinking'); }
+      const speech = document.querySelector(`[data-agent-speech="${agentId}"]`);
+      if (speech) speech.textContent = '\ud83d\udcac ' + phrase;
+    };
+    update();
+    const interval = setInterval(update, 800);
+    return () => {
+      clearInterval(interval);
+      const bubble = document.querySelector(`[data-agent-bubble="${agentId}"]`);
+      if (bubble) bubble.classList.remove('thinking');
+    };
+  }
+
   const ids = {
     npcName: document.getElementById('npcName'),
     npcDescription: document.getElementById('npcDescription'),
@@ -111,13 +143,16 @@
     renderOffice();
     setLog(`You said to ${agent.name}: "${message}"`);
 
+    const stopThinking = startThinking(agent.id);
     try {
       const response = await sendMessageToFoundryAgent(agent, message);
+      stopThinking();
       agent.lastSpeech = response;
       renderOffice();
       renderAgentsPanel();
       setLog(`${agent.name} responded.`);
     } catch (error) {
+      stopThinking();
       setLog(error.message);
     }
   }
@@ -161,7 +196,7 @@
           Enabled
         </label>
         <div class="agent-chat">
-          <div class="agent-last-speech">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
+          <div class="agent-last-speech" data-agent-speech="${agent.id}">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
           <div class="row agent-chat-row">
             <input data-agent-input="${agent.id}" placeholder="Say something to ${escapedName}..." />
             <button data-agent-send="${agent.id}">Chat</button>
@@ -172,7 +207,7 @@
     });
   }
 
-  function createDeskElement({ x, y }, label, spriteClass, bubbleText) {
+  function createDeskElement({ x, y }, label, spriteClass, bubbleText, agentId) {
     const desk = document.createElement('div');
     desk.className = 'iso-desk';
     desk.style.left = `${x}px`;
@@ -191,6 +226,7 @@
       const bubble = document.createElement('div');
       bubble.className = 'px-bubble';
       bubble.textContent = bubbleText;
+      if (agentId) bubble.dataset.agentBubble = agentId;
       desk.appendChild(bubble);
     }
 
@@ -203,6 +239,16 @@
     const scene = document.createElement('div');
     scene.className = 'iso-scene';
 
+    // Person image layers (1.png through 6.png)
+    state.agents.forEach((agent, index) => {
+      if (index >= 6) return;
+      const img = document.createElement('img');
+      img.src = `assets/img/${index + 1}.png`;
+      img.className = 'person-layer' + (agent.enabled ? '' : ' hidden');
+      img.alt = agent.name;
+      scene.appendChild(img);
+    });
+
     // Desks (overlay labels + bubbles on background image)
     const userDesk = DESKS[state.user.deskIndex];
     scene.appendChild(createDeskElement(userDesk, state.user.name, 'user', state.user.speech));
@@ -211,7 +257,7 @@
       const desk = getDeskForAgent(index);
       const spriteClass = agent.enabled ? 'awake' : 'nap';
       const bubble = agent.enabled ? agent.lastSpeech : 'Zzz...';
-      scene.appendChild(createDeskElement(desk, agent.name, spriteClass, bubble));
+      scene.appendChild(createDeskElement(desk, agent.name, spriteClass, bubble, agent.id));
     });
 
     for (let i = state.agents.length + 1; i < DESKS.length; i += 1) {
@@ -259,14 +305,19 @@
     }
 
     if (state.workflowMode === 'group') {
-      const results = await Promise.allSettled(enabledAgents.map(async (agent) => {
+      const stopFns = enabledAgents.map((agent) => startThinking(agent.id));
+      const results = await Promise.allSettled(enabledAgents.map(async (agent, i) => {
         try {
           const response = await sendMessageToFoundryAgent(agent, message);
+          stopFns[i]();
           agent.lastSpeech = response;
         } catch (error) {
+          stopFns[i]();
           throw new Error(`Agent ${agent.name} failed in group workflow: ${error.message}`);
         }
       }));
+
+      stopFns.forEach((fn) => fn());
 
       const failures = results
         .filter((result) => result.status === 'rejected')
@@ -279,11 +330,14 @@
 
     let rollingMessage = message;
     for (const agent of enabledAgents) {
+      const stopThinking = startThinking(agent.id);
       try {
         const response = await sendMessageToFoundryAgent(agent, rollingMessage);
+        stopThinking();
         agent.lastSpeech = response;
         rollingMessage = `Previous agent response: ${response}`;
       } catch (error) {
+        stopThinking();
         throw new Error(`Agent ${agent.name} failed in sequential workflow: ${error.message}`);
       }
     }
