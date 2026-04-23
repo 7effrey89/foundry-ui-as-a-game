@@ -24,6 +24,33 @@ logger = logging.getLogger(__name__)
 
 credential = DefaultAzureCredential()
 
+# In-memory per-agent metrics (reset on server restart)
+_agent_metrics: Dict[str, Dict[str, Any]] = {}
+
+
+def _record_metrics(agent_name: str, result: Dict[str, Any], error: bool = False) -> None:
+    """Accumulate per-agent usage from a Foundry API response."""
+    m = _agent_metrics.setdefault(agent_name, {
+        "runs": 0,
+        "errors": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "tool_calls": 0,
+    })
+    m["runs"] += 1
+    if error:
+        m["errors"] += 1
+        return
+    usage = result.get("usage") or {}
+    m["prompt_tokens"] += usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
+    m["completion_tokens"] += usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+    m["total_tokens"] += usage.get("total_tokens", 0)
+    for item in result.get("output", []):
+        if item.get("type", "").startswith("mcp_"):
+            m["tool_calls"] += 1
+
+
 app = Flask(__name__)
 
 
@@ -281,17 +308,22 @@ def send_message() -> Any:
             input_messages.append({"role": role, "content": content})
     input_messages.append({"role": "user", "content": message})
 
-    result = foundry_request(
-        "/openai/v1/responses",
-        "POST",
-        {
-            "agent_reference": {
-                "type": "agent_reference",
-                "name": agent_name,
+    try:
+        result = foundry_request(
+            "/openai/v1/responses",
+            "POST",
+            {
+                "agent_reference": {
+                    "type": "agent_reference",
+                    "name": agent_name,
+                },
+                "input": input_messages,
             },
-            "input": input_messages,
-        },
-    )
+        )
+    except Exception as exc:
+        _record_metrics(agent_name, {}, error=True)
+        raise
+    _record_metrics(agent_name, result)
 
     trace = [
         {
@@ -333,6 +365,7 @@ def send_message() -> Any:
                 "input": approvals,
             },
         )
+        _record_metrics(agent_name, result)
         trace.extend(_build_trace_entries(result))
 
     output_text = _extract_response_text(result)
@@ -349,8 +382,14 @@ def send_message() -> Any:
         {
             "response": output_text or "No response received from agent.",
             "trace": trace,
+            "usage": _agent_metrics.get(agent_name, {}),
         }
     )
+
+
+@app.get("/api/metrics")
+def get_metrics() -> Any:
+    return jsonify(_agent_metrics)
 
 
 @app.errorhandler(Exception)

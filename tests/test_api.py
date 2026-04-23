@@ -678,3 +678,118 @@ def test_send_message_without_context(monkeypatch):
     input_msgs = captured["body"]["input"]
     assert len(input_msgs) == 1
     assert input_msgs[0] == {"role": "user", "content": "Hello"}
+
+
+# --- Metrics tests ---
+
+
+def test_record_metrics_accumulates_usage():
+    target._agent_metrics.clear()
+    result = {
+        "usage": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        "output": [],
+    }
+    target._record_metrics("AgentA", result)
+    m = target._agent_metrics["AgentA"]
+    assert m["runs"] == 1
+    assert m["prompt_tokens"] == 100
+    assert m["completion_tokens"] == 50
+    assert m["total_tokens"] == 150
+    assert m["errors"] == 0
+    assert m["tool_calls"] == 0
+
+    # second call accumulates
+    target._record_metrics("AgentA", result)
+    assert m["runs"] == 2
+    assert m["prompt_tokens"] == 200
+    assert m["total_tokens"] == 300
+
+
+def test_record_metrics_counts_tool_calls():
+    target._agent_metrics.clear()
+    result = {
+        "usage": {"total_tokens": 10},
+        "output": [
+            {"type": "mcp_list_tools"},
+            {"type": "mcp_call"},
+            {"type": "message", "content": []},
+        ],
+    }
+    target._record_metrics("AgentB", result)
+    assert target._agent_metrics["AgentB"]["tool_calls"] == 2
+
+
+def test_record_metrics_tracks_errors():
+    target._agent_metrics.clear()
+    target._record_metrics("AgentC", {}, error=True)
+    m = target._agent_metrics["AgentC"]
+    assert m["runs"] == 1
+    assert m["errors"] == 1
+    assert m["total_tokens"] == 0
+
+
+def test_get_metrics_endpoint(monkeypatch):
+    client = make_client()
+    target._agent_metrics.clear()
+    target._agent_metrics["Jaime"] = {
+        "runs": 3,
+        "errors": 0,
+        "prompt_tokens": 200,
+        "completion_tokens": 100,
+        "total_tokens": 300,
+        "tool_calls": 1,
+    }
+    response = client.get("/api/metrics")
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["Jaime"]["runs"] == 3
+    assert data["Jaime"]["total_tokens"] == 300
+    target._agent_metrics.clear()
+
+
+def test_send_message_returns_usage_in_response(monkeypatch):
+    client = make_client()
+    target._agent_metrics.clear()
+
+    def fake_foundry_request(path, method, body=None):
+        return {
+            "output_text": "Hello!",
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+            "output": [],
+        }
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.post(
+        "/api/messages",
+        json={"agentName": "Jaime", "message": "Hi"},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert "usage" in data
+    assert data["usage"]["runs"] == 1
+    assert data["usage"]["total_tokens"] == 15
+    target._agent_metrics.clear()
+
+
+def test_metrics_empty_when_no_runs():
+    client = make_client()
+    target._agent_metrics.clear()
+    response = client.get("/api/metrics")
+    assert response.status_code == 200
+    assert response.get_json() == {}
+
+
+def test_record_metrics_handles_legacy_token_keys():
+    """Supports both OpenAI-style (prompt_tokens) and Foundry-style (input_tokens) keys."""
+    target._agent_metrics.clear()
+    result = {
+        "usage": {"prompt_tokens": 80, "completion_tokens": 40, "total_tokens": 120},
+        "output": [],
+    }
+    target._record_metrics("AgentD", result)
+    m = target._agent_metrics["AgentD"]
+    assert m["prompt_tokens"] == 80
+    assert m["completion_tokens"] == 40
+    assert m["total_tokens"] == 120

@@ -14,6 +14,8 @@
 - Chat directly with a specific agent via the per-agent input field.
 - Enable/disable agents to control which desks are online.
 - Agent speech bubbles can show observability snippets (tool approvals/reasoning summaries) during conversations.
+- Agent cards show a metrics badge (run count + total tokens) once an agent has been used.
+- Agent detail modal includes an **Operational Metrics** section: runs, errors, error rate, prompt/completion/total tokens, and tool calls.
 - Five orchestration patterns from the [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/), selectable via the UI:
   - **Concurrent**: All agents process the same message simultaneously and independently.
   - **Sequential**: Agents execute in pipeline order, each building on the previous output.
@@ -32,6 +34,8 @@
 - `POST /api/messages` sends a message to a specific agent.
 - `POST /api/messages` accepts optional `context` array for multi-turn conversation history.
 - `POST /api/messages` returns both final `response` and chronological `trace` events for observability.
+- `POST /api/messages` returns per-agent `usage` metrics (runs, tokens, errors, tool calls) accumulated across the session.
+- `GET /api/metrics` returns aggregated per-agent operational metrics.
 - Uses Azure `DefaultAzureCredential` for Entra authentication without API keys.
 - Configurable token scope via `FOUNDRY_SCOPE` (defaults to `https://ai.azure.com`).
 - Agent creation uses the new Foundry Agents API (`api-version=v1`) with `definition.kind=prompt`.

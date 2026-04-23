@@ -214,6 +214,24 @@
       html += `<pre>${esc(JSON.stringify(agent.raiConfig, null, 2))}</pre>`;
     }
 
+    // ── Operational Metrics ──────────────────────
+    const m = agent.metrics;
+    if (m && m.runs > 0) {
+      html += '<h3>Operational Metrics</h3>';
+      html += '<table>';
+      html += `<tr><th>Runs</th><td>${m.runs}</td></tr>`;
+      html += `<tr><th>Errors</th><td>${m.errors || 0}</td></tr>`;
+      html += `<tr><th>Error Rate</th><td>${m.runs ? ((m.errors || 0) / m.runs * 100).toFixed(1) + '%' : '—'}</td></tr>`;
+      html += `<tr><th>Prompt Tokens</th><td>${(m.prompt_tokens || 0).toLocaleString()}</td></tr>`;
+      html += `<tr><th>Completion Tokens</th><td>${(m.completion_tokens || 0).toLocaleString()}</td></tr>`;
+      html += `<tr><th>Total Tokens</th><td>${(m.total_tokens || 0).toLocaleString()}</td></tr>`;
+      html += `<tr><th>Tool Calls</th><td>${m.tool_calls || 0}</td></tr>`;
+      html += '</table>';
+    } else {
+      html += '<h3>Operational Metrics</h3>';
+      html += '<p style="color:var(--muted);font-size:0.8rem">No runs recorded yet. Send a message to start tracking.</p>';
+    }
+
     ids.agentDetailBody.innerHTML = html;
     ids.agentDetailModal.style.display = 'flex';
   }
@@ -265,7 +283,11 @@
   async function sendMessageToFoundryAgent(agent, message, context) {
     const body = { agentName: agent.foundryAgentName, message };
     if (context && context.length) { body.context = context; }
-    return foundryRequest('/messages', 'POST', body);
+    const result = await foundryRequest('/messages', 'POST', body);
+    if (result && result.usage) {
+      agent.metrics = result.usage;
+    }
+    return result;
   }
 
   async function fetchAgents() {
@@ -332,9 +354,10 @@
       return;
     }
 
-    state.trace.forEach((entry) => {
+    state.trace.forEach((entry, idx) => {
       const item = document.createElement('article');
       item.className = 'trace-item';
+      item.dataset.traceIdx = idx;
       const color = entry.agentId === 'user' ? '#6b7280' : getAgentColor(entry.agentId);
       item.style.borderLeftColor = color;
 
@@ -362,6 +385,38 @@
       state.trace = state.trace.slice(state.trace.length - MAX_TRACE_ENTRIES);
     }
     renderTracePanel();
+  }
+
+  function scrollToTraceForAgent(agentId) {
+    // Open the trace sidebar if hidden
+    if (ids.traceSidebar.style.display === 'none') {
+      ids.traceSidebar.style.display = '';
+      ids.showTraceBtn.style.display = 'none';
+      document.querySelector('.app').style.marginRight = ids.traceSidebar.style.width || '';
+    }
+
+    // Find the last final_response for this agent
+    let targetIdx = -1;
+    for (let i = state.trace.length - 1; i >= 0; i--) {
+      if (state.trace[i].agentId === agentId && state.trace[i].type === 'final_response') {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx < 0) return;
+
+    const el = ids.traceList.querySelector(`[data-trace-idx="${targetIdx}"]`);
+    if (!el) return;
+
+    // Remove any existing highlight
+    const prev = ids.traceList.querySelector('.trace-highlight');
+    if (prev) prev.classList.remove('trace-highlight');
+
+    el.classList.add('trace-highlight');
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Auto-remove highlight after 4s
+    setTimeout(() => el.classList.remove('trace-highlight'), 4000);
   }
 
   function addTraceEntries(agent, result, channel) {
@@ -429,7 +484,10 @@
         badges('🔧', agent.tools, 'badge-tool'),
         badges('📚', agent.knowledge, 'badge-knowledge'),
         badges('🧠', agent.memory, 'badge-memory'),
-        agent.guardrail ? `<span class="badge badge-guardrail">🛡️ ${agent.guardrail.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>` : ''
+        agent.guardrail ? `<span class="badge badge-guardrail">🛡️ ${agent.guardrail.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>` : '',
+        agent.metrics && agent.metrics.runs > 0
+          ? `<span class="badge badge-metrics">📊 ${agent.metrics.runs} run${agent.metrics.runs !== 1 ? 's' : ''} · ${(agent.metrics.total_tokens || 0).toLocaleString()} tok</span>`
+          : ''
       ].filter(Boolean).join(' ');
 
       card.innerHTML = `
@@ -437,7 +495,7 @@
         <div class="status"><label><input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" /> ${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</label></div>
         ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
         <div class="agent-chat">
-          <div class="agent-last-speech" data-agent-speech="${agent.id}">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
+          <div class="agent-last-speech clickable-bubble" data-agent-speech="${agent.id}" data-speech-agent="${agent.id}">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
           <div class="row agent-chat-row">
             <input data-agent-input="${agent.id}" placeholder="Say something to ${escapedName}..." />
             <button data-agent-send="${agent.id}">Chat</button>
@@ -474,7 +532,11 @@
       bubble.className = 'px-bubble';
       if (pos.bubbleLeft !== undefined) bubble.style.left = `${pos.bubbleLeft}px`;
       bubble.textContent = bubbleText;
-      if (agentId) bubble.dataset.agentBubble = agentId;
+      if (agentId) {
+        bubble.dataset.agentBubble = agentId;
+        bubble.classList.add('clickable-bubble');
+        bubble.addEventListener('click', () => scrollToTraceForAgent(agentId));
+      }
       desk.appendChild(bubble);
     }
 
@@ -598,6 +660,7 @@
         foundryAgentId: foundryAgent.id,
         foundryAgentName: foundryAgent.name,
         enabled: enabledCount < MAX_ENABLED_AGENTS,
+        metrics: null,
         lastSpeech: 'Ready to help!',
         bubbleSpeech: ''
       });
@@ -923,6 +986,14 @@
     showAgentDetail(link.dataset.agentDetail);
   });
 
+  // ── Clickable speech in sidebar ────────────────
+  ids.agentList.addEventListener('click', (e) => {
+    const speech = e.target.closest('[data-speech-agent]');
+    if (!speech) return;
+    const agentId = speech.dataset.speechAgent;
+    if (agentId) scrollToTraceForAgent(agentId);
+  });
+
   function renderOrchestrationInfo() {
     const mode = state.workflowMode;
     const info = ORCHESTRATION_INFO[mode] || ORCHESTRATION_INFO.concurrent;
@@ -986,6 +1057,7 @@
             memory: ra.memory || [],
             guardrail: ra.guardrail || '',
             raiConfig: ra.rai_config || {},
+            metrics: null,
             enabled: state.agents.filter((a) => a.enabled).length < MAX_ENABLED_AGENTS,
             lastSpeech: 'Ready to help!',
             bubbleSpeech: ''
@@ -993,6 +1065,7 @@
           added += 1;
         }
       });
+      await loadMetrics();
       renderAgentsPanel();
       renderOffice();
       populateAgentSelectors();
@@ -1000,6 +1073,21 @@
       setLog(`${selectedCount} selected from Foundry (${remoteAgents.length} total).`);
     } catch (error) {
       setLog(error.message);
+    }
+  }
+
+  async function loadMetrics() {
+    try {
+      const metrics = await foundryRequest('/metrics', 'GET');
+      if (!metrics || typeof metrics !== 'object') return;
+      state.agents.forEach((agent) => {
+        const key = agent.foundryAgentName || agent.name;
+        if (metrics[key]) {
+          agent.metrics = metrics[key];
+        }
+      });
+    } catch {
+      // metrics are best-effort, don't block
     }
   }
 
