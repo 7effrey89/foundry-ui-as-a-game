@@ -19,18 +19,19 @@
   // Desk positions as fractions of the 1024×1024 source image (head positions)
   // Agent i → desk (i+1)%6, person overlay (i+1).png
   const DESK_IMG = [
-    { ix: 0.68, iy: 0.56 },  // desk 0: person 6.png head (front-right)
-    { ix: 0.30, iy: 0.29 },  // desk 1: person 1.png head (back-left)
-    { ix: 0.49, iy: 0.27 },  // desk 2: person 2.png head (back-center)
-    { ix: 0.26, iy: 0.54 },  // desk 3: person 3.png head (front-left)
-    { ix: 0.48, iy: 0.41 },  // desk 4: person 4.png head (center)
-    { ix: 0.80, iy: 0.33 }   // desk 5: person 5.png head (back-right)
+    { ix: 0.74, iy: 0.57, bx: -30 },  // desk 0: person 6.png head (front-right) 
+    { ix: 0.30, iy: 0.30, bx: -30 },  // desk 1: person 1.png head (back-left)
+    { ix: 0.52, iy: 0.25, bx: -30 },  // desk 2: person 2.png head (back-center)
+    { ix: 0.30, iy: 0.53, bx: -30 },  // desk 3: person 3.png head (front-left) //Person number 3
+    { ix: 0.50, iy: 0.43, bx: 0 },    // desk 4: person 4.png head (center)
+    { ix: 0.83, iy: 0.35, bx: -30 }   // desk 5: person 5.png head (back-right)
   ];
 
   function getDesks() {
-    return DESK_IMG.map(({ ix, iy }) => ({
+    return DESK_IMG.map(({ ix, iy, bx }) => ({
       pctX: (ix * 100 - 5).toFixed(2),
-      pctY: (iy * 100 - 3).toFixed(2)
+      pctY: (iy * 100 - 3).toFixed(2),
+      bubbleLeft: bx
     }));
   }
 
@@ -402,6 +403,7 @@
     if (bubbleText) {
       const bubble = document.createElement('div');
       bubble.className = 'px-bubble';
+      if (pos.bubbleLeft !== undefined) bubble.style.left = `${pos.bubbleLeft}px`;
       bubble.textContent = bubbleText;
       if (agentId) bubble.dataset.agentBubble = agentId;
       desk.appendChild(bubble);
@@ -883,7 +885,7 @@
             knowledge: ra.knowledge || [],
             memory: ra.memory || [],
             guardrail: ra.guardrail || '',
-            enabled: state.agents.filter((a) => a.enabled).length + added < MAX_ENABLED_AGENTS,
+            enabled: state.agents.filter((a) => a.enabled).length < MAX_ENABLED_AGENTS,
             lastSpeech: 'Ready to help!',
             bubbleSpeech: ''
           });
