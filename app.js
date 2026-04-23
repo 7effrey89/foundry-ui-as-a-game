@@ -361,12 +361,8 @@
 
       card.innerHTML = `
         <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span>${escapedName}</div>
-        <div class="status">${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</div>
+        <div class="status"><label><input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" /> ${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</label></div>
         ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
-        <label>
-          <input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" />
-          Enabled
-        </label>
         <div class="agent-chat">
           <div class="agent-last-speech" data-agent-speech="${agent.id}">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
           <div class="row agent-chat-row">
