@@ -1,0 +1,296 @@
+:root {
+  --bg: #2d2b55;
+  --panel: #ffffff;
+  --line: #d1d5db;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #3b82f6;
+  --awake: #22c55e;
+  --nap: #f59e0b;
+}
+
+* {
+  box-sizing: border-box;
+  image-rendering: pixelated;
+  font-family: "Courier New", monospace;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.subtitle {
+  color: var(--muted);
+}
+
+.panel {
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 0;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
+}
+
+.grid.two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+label,
+small,
+legend {
+  color: var(--muted);
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+input,
+textarea,
+select,
+button {
+  width: 100%;
+  padding: 0.55rem;
+  border: 2px solid var(--line);
+  border-radius: 0;
+  background: #f9fafb;
+  color: var(--text);
+  font-family: "Courier New", monospace;
+}
+
+button {
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: 2px solid #1e40af;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+button:hover {
+  background: #2563eb;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.status,
+.log {
+  color: var(--muted);
+}
+
+.message-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.message-row button {
+  width: auto;
+  white-space: nowrap;
+}
+
+.agent-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.agent-card {
+  border: 2px solid var(--line);
+  border-radius: 0;
+  padding: 0.55rem;
+  background: #f9fafb;
+}
+
+.agent-name {
+  font-weight: 700;
+}
+
+.agent-badges {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: #fff;
+}
+
+.badge-tool { background: #6366f1; }
+.badge-knowledge { background: #0891b2; }
+.badge-memory { background: #7c3aed; }
+.badge-guardrail { background: #dc2626; }
+
+.agent-chat {
+  margin-top: 0.4rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.4rem;
+}
+
+.agent-last-speech {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  max-height: 3.6em;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.agent-chat-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0;
+}
+
+.agent-chat-row input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.35rem;
+}
+
+.agent-chat-row button {
+  width: auto;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+/* ── Office View ─────────────────────────────────── */
+
+.office {
+  position: relative;
+  width: 100%;
+  height: 680px;
+  overflow: hidden;
+  border: 2px solid #1a1840;
+}
+
+.iso-scene {
+  position: absolute;
+  inset: 0;
+  background: url('assets/img/bg.png') center / cover no-repeat;
+}
+
+.person-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.person-layer.hidden {
+  opacity: 0;
+}
+
+/* ── Desk hotspot (invisible, just positions overlays) ── */
+.iso-desk {
+  position: absolute;
+  width: 120px;
+  height: 100px;
+  z-index: 4;
+}
+
+/* ── Name label ──────────────────────────────── */
+.iso-label {
+  position: absolute;
+  top: -2px;
+  left: -10px;
+  right: -10px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow:
+    1px 0 0 #000, -1px 0 0 #000,
+    0 1px 0 #000, 0 -1px 0 #000;
+  white-space: nowrap;
+  z-index: 12;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-family: "Courier New", monospace;
+}
+
+/* ── Speech bubble ───────────────────────────── */
+.px-bubble {
+  position: absolute;
+  max-width: 150px;
+  padding: 4px 8px;
+  background: #fff;
+  color: #1e293b;
+  border: 3px solid #1e293b;
+  font-size: 9px;
+  line-height: 1.3;
+  top: -28px;
+  left: -30px;
+  z-index: 20;
+  font-family: "Courier New", monospace;
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.2);
+}
+
+.px-bubble.thinking {
+  animation: thinking-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.px-bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -7px; left: 40px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid #1e293b;
+}
+
+.px-bubble::before {
+  content: "";
+  position: absolute;
+  bottom: -4px; left: 41px;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #fff;
+  z-index: 1;
+}
+
+/* ── Status dot on desk ──────────────────────── */
+.desk-status {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid rgba(0,0,0,0.3);
+  z-index: 10;
+}
+
+.desk-status.awake { background: #22c55e; }
+.desk-status.nap   { background: #f59e0b; }
+.desk-status.user  { background: #3b82f6; }
+.desk-status.empty { background: #64748b; }

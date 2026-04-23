@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Foundry UI as a Game</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>Foundry UI as a Game</h1>
+        <p class="subtitle">Pixel-style office for visual multi-agent demos</p>
+      </header>
+
+      <section class="panel auth-panel">
+        <h2>1) Server Configuration</h2>
+        <p class="status">
+          This app now authenticates with Azure using DefaultAzureCredential on the Flask server.
+        </p>
+        <div class="grid two-col">
+          <div>
+            <strong>Required env vars</strong>
+            <ul>
+              <li>FOUNDRY_PROJECT_ENDPOINT</li>
+              <li>FOUNDRY_MODEL_DEPLOYMENT</li>
+              <li>FOUNDRY_API_VERSION (optional)</li>
+            </ul>
+          </div>
+          <div>
+            <strong>Auth options</strong>
+            <ul>
+              <li>Azure CLI: <code>az login</code></li>
+              <li>Managed Identity / Workload Identity</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel control-panel">
+        <h2>2) Agents, Workflow, and Messaging</h2>
+        <div class="grid two-col">
+          <fieldset>
+            <legend>Create NPC (Creates Foundry Agent)</legend>
+            <label>Name <input id="npcName" maxlength="40" /></label>
+            <label>Description/System Prompt
+              <textarea id="npcDescription" rows="4" placeholder="Helpful finance specialist agent"></textarea>
+            </label>
+            <button id="createNpcBtn">Create NPC Agent</button>
+          </fieldset>
+
+          <fieldset>
+            <legend>Workflow</legend>
+            <label>Strategy
+              <select id="workflowMode">
+                <option value="group">Group (all enabled agents respond)</option>
+                <option value="sequential">Sequential (enabled agents respond in order)</option>
+              </select>
+            </label>
+            <small>Disabled agents go to sleep at their desk.</small>
+            <button id="loadAgentsBtn" style="margin-top:0.5rem">Load Existing Foundry Agents</button>
+          </fieldset>
+        </div>
+
+        <div class="row message-row">
+          <input id="userMessage" placeholder="Type what your character says to the office..." />
+          <button id="sendMessageBtn">Speak to All</button>
+        </div>
+
+        <div id="agentList" class="agent-list"></div>
+        <p id="eventLog" class="log"></p>
+      </section>
+
+      <section class="panel world-panel">
+        <h2>3) Office View</h2>
+        <div id="office" class="office"></div>
+      </section>
+    </main>
+  </body>
+</html>
