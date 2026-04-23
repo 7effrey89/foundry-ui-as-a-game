@@ -17,6 +17,7 @@
         </div>
       </div>
       <div id="agentList" class="agent-list"></div>
+      <div id="sidebarFooter" class="sidebar-footer"></div>
     </aside>
 
     <main class="app">
@@ -43,6 +44,8 @@
                   <option value="append_history">Append full context chain</option>
                 </select>
               </label>
+              <label>Pipeline Order</label>
+              <div id="sequentialOrder" class="sequential-order"></div>
             </div>
             <div id="handoffConfig" class="orchestration-config" style="display:none">
               <label>Triage Agent
@@ -101,18 +104,28 @@
       </div>
     </div>
 
+    <div id="metricsSummaryModal" class="modal-overlay" style="display:none">
+      <div class="modal-box modal-box-wide">
+        <div class="modal-head">
+          <strong>Operational Metrics Summary</strong>
+          <button id="closeMetricsSummaryBtn" type="button">&times;</button>
+        </div>
+        <div id="metricsSummaryBody" class="agent-detail-body"></div>
+      </div>
+    </div>
+
     <aside class="trace-sidebar" id="traceSidebar">
       <div class="trace-resize-handle" id="traceResizeHandle"></div>
       <div class="trace-head">
         <strong>Session Trace</strong>
         <div class="trace-head-buttons">
-          <button id="clearTraceBtn" type="button">Clear</button>
-          <button id="hideTraceBtn" type="button">&raquo;</button>
+          <button id="clearTraceBtn" type="button" title="Clear the session history">Clear</button>
+          <button id="hideTraceBtn" type="button" title="Toggle session trace visibility">&raquo;</button>
         </div>
       </div>
       <div id="traceList" class="trace-list"></div>
     </aside>
     <div id="infoBubbleTooltip" class="info-bubble-tooltip" style="display:none"></div>
-    <button id="showTraceBtn" class="trace-show-tab" style="display:none">&laquo; Trace</button>
+    <button id="showTraceBtn" class="trace-show-tab" style="display:none" title="Toggle session trace visibility">&laquo; Trace</button>
   </body>
 </html>

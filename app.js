@@ -7,6 +7,7 @@
     },
     workflowMode: 'concurrent',
     handoffMode: 'previous_response',
+    sequentialOrder: [],
     maxRounds: 3,
     triageAgentId: '',
     managerAgentId: '',
@@ -151,11 +152,17 @@
     agentDetailModal: document.getElementById('agentDetailModal'),
     agentDetailTitle: document.getElementById('agentDetailTitle'),
     agentDetailBody: document.getElementById('agentDetailBody'),
-    closeAgentDetailBtn: document.getElementById('closeAgentDetailBtn')
+    closeAgentDetailBtn: document.getElementById('closeAgentDetailBtn'),
+    sequentialOrder: document.getElementById('sequentialOrder'),
+    sidebarFooter: document.getElementById('sidebarFooter'),
+    metricsSummaryModal: document.getElementById('metricsSummaryModal'),
+    metricsSummaryBody: document.getElementById('metricsSummaryBody'),
+    closeMetricsSummaryBtn: document.getElementById('closeMetricsSummaryBtn')
   };
 
-  function setLog(message) {
+  function setLog(message, color) {
     ids.eventLog.textContent = message;
+    ids.eventLog.style.color = color || '';
   }
 
   function setModalLog(message) {
@@ -234,6 +241,48 @@
 
     ids.agentDetailBody.innerHTML = html;
     ids.agentDetailModal.style.display = 'flex';
+  }
+
+  function renderSidebarFooter() {
+    if (!ids.sidebarFooter) return;
+    const agentsWithMetrics = state.agents.filter((a) => a.metrics && a.metrics.runs > 0);
+    let totalTokens = 0;
+    agentsWithMetrics.forEach((a) => { totalTokens += a.metrics.total_tokens || 0; });
+    if (!agentsWithMetrics.length) {
+      ids.sidebarFooter.innerHTML = '<span class="footer-stat">No usage yet</span>';
+      return;
+    }
+    ids.sidebarFooter.innerHTML = `<span class="footer-stat clickable-bubble" id="openMetricsSummary" title="View statistics">📊 ${totalTokens.toLocaleString()} tokens · ${agentsWithMetrics.length} agent${agentsWithMetrics.length !== 1 ? 's' : ''}</span>`;
+  }
+
+  function showMetricsSummary() {
+    const agentsWithMetrics = state.agents.filter((a) => a.metrics && a.metrics.runs > 0);
+    if (!agentsWithMetrics.length) return;
+
+    const totals = { runs: 0, errors: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, tool_calls: 0 };
+    agentsWithMetrics.forEach((a) => {
+      const m = a.metrics;
+      totals.runs += m.runs || 0;
+      totals.errors += m.errors || 0;
+      totals.prompt_tokens += m.prompt_tokens || 0;
+      totals.completion_tokens += m.completion_tokens || 0;
+      totals.total_tokens += m.total_tokens || 0;
+      totals.tool_calls += m.tool_calls || 0;
+    });
+
+    let html = '<table class="metrics-summary-table">';
+    html += '<thead><tr><th>Agent</th><th>Model</th><th>Runs</th><th>Errors</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Tools</th></tr></thead>';
+    html += '<tbody>';
+    agentsWithMetrics.forEach((a) => {
+      const m = a.metrics;
+      const status = a.enabled ? '🟢' : '⚪';
+      html += `<tr><td>${status} ${esc(a.name)}</td><td>${esc(a.model || '—')}</td><td>${m.runs}</td><td>${m.errors || 0}</td><td>${(m.prompt_tokens || 0).toLocaleString()}</td><td>${(m.completion_tokens || 0).toLocaleString()}</td><td>${(m.total_tokens || 0).toLocaleString()}</td><td>${m.tool_calls || 0}</td></tr>`;
+    });
+    html += `<tr class="metrics-totals-row"><td><strong>Total</strong></td><td></td><td><strong>${totals.runs}</strong></td><td><strong>${totals.errors}</strong></td><td><strong>${totals.prompt_tokens.toLocaleString()}</strong></td><td><strong>${totals.completion_tokens.toLocaleString()}</strong></td><td><strong>${totals.total_tokens.toLocaleString()}</strong></td><td><strong>${totals.tool_calls}</strong></td></tr>`;
+    html += '</tbody></table>';
+
+    ids.metricsSummaryBody.innerHTML = html;
+    ids.metricsSummaryModal.style.display = 'flex';
   }
 
   function createLocalId() {
@@ -372,6 +421,27 @@
 
       item.appendChild(meta);
       item.appendChild(summary);
+
+      // Expand button when full text is longer than summary
+      if (entry.fullText && entry.fullText.length > entry.summary.length) {
+        const expandBtn = document.createElement('button');
+        expandBtn.className = 'trace-expand-btn';
+        expandBtn.textContent = 'Show more';
+        expandBtn.type = 'button';
+        let expanded = false;
+        expandBtn.addEventListener('click', () => {
+          expanded = !expanded;
+          if (expanded) {
+            summary.textContent = entry.fullText;
+            expandBtn.textContent = 'Show less';
+          } else {
+            summary.textContent = entry.summary;
+            expandBtn.textContent = 'Show more';
+          }
+        });
+        item.appendChild(expandBtn);
+      }
+
       ids.traceList.appendChild(item);
     });
   }
@@ -430,7 +500,8 @@
         agentName: agent.name,
         agentId: agent.id,
         type: entry.type || channel,
-        summary: entry.summary || shortText(entry.text || '')
+        summary: entry.summary || shortText(entry.text || ''),
+        fullText: entry.text || ''
       });
     });
 
@@ -491,19 +562,20 @@
       ].filter(Boolean).join(' ');
 
       card.innerHTML = `
-        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span><a href="#" class="agent-name-link" data-agent-detail="${agent.id}">${escapedName}</a><span class="info-bubble" data-tooltip="${escapedDesc}">i</span></div>
-        <div class="status"><label><input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" /> ${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</label></div>
+        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span><a href="#" class="agent-name-link" data-agent-detail="${agent.id}" title="See details for ${escapedName}">${escapedName}</a><span class="info-bubble" data-tooltip="${escapedDesc}">i</span></div>
+        <div class="status"><label title="Click to enable or disable"><input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" /> ${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</label></div>
         ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
         <div class="agent-chat">
-          <div class="agent-last-speech clickable-bubble" data-agent-speech="${agent.id}" data-speech-agent="${agent.id}">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
+          <div class="agent-last-speech clickable-bubble" data-agent-speech="${agent.id}" data-speech-agent="${agent.id}" title="Click to see full text in session trace">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
           <div class="row agent-chat-row">
             <input data-agent-input="${agent.id}" placeholder="Say something to ${escapedName}..." />
-            <button data-agent-send="${agent.id}">Chat</button>
+            <button data-agent-send="${agent.id}" title="Ask ${escapedName} a question">Chat</button>
           </div>
         </div>
       `;
       ids.agentList.appendChild(card);
     });
+    renderSidebarFooter();
   }
 
   function createDeskElement(pos, label, spriteClass, bubbleText, agentId, agentColor) {
@@ -535,6 +607,8 @@
       if (agentId) {
         bubble.dataset.agentBubble = agentId;
         bubble.classList.add('clickable-bubble');
+        bubble.style.setProperty('--agent-color', agentColor || '#3b82f6');
+        bubble.title = 'Click to see full text in session trace';
         bubble.addEventListener('click', () => scrollToTraceForAgent(agentId));
       }
       desk.appendChild(bubble);
@@ -626,7 +700,8 @@
       const desk = desks[deskIdx];
       const bubble = agent.bubbleSpeech || agent.lastSpeech || '';
       const color = getAgentColor(agent.id);
-      scene.appendChild(createDeskElement(desk, agent.name, 'awake', bubble, agent.id, color));
+      const deskEl = createDeskElement(desk, agent.name, 'awake', bubble, agent.id, color);
+      scene.appendChild(deskEl);
     });
 
     // Fill remaining desks as empty (clickable to assign)
@@ -706,8 +781,19 @@
   }
 
   async function runSequential(message, enabledAgents) {
+    // Use configured order if available
+    let orderedAgents = enabledAgents;
+    if (state.sequentialOrder.length) {
+      const ordered = state.sequentialOrder
+        .map((id) => enabledAgents.find((a) => a.id === id))
+        .filter(Boolean);
+      // Append any enabled agents not in the order list
+      const orderedIds = new Set(ordered.map((a) => a.id));
+      enabledAgents.forEach((a) => { if (!orderedIds.has(a.id)) ordered.push(a); });
+      orderedAgents = ordered;
+    }
     let rollingMessage = message;
-    for (const agent of enabledAgents) {
+    for (const agent of orderedAgents) {
       const stopThinking = startThinking(agent.id);
       addTrace({
         agentName: agent.name,
@@ -952,9 +1038,9 @@
     try {
       await processMessageThroughWorkflow(message);
       renderOffice();
-      setLog(`Workflow "${state.workflowMode}" complete.`);
+      setLog(`Workflow "${state.workflowMode}" complete.`, 'var(--awake)');
     } catch (error) {
-      setLog(error.message);
+      setLog(error.message, '#ef4444');
     }
   }
 
@@ -978,6 +1064,17 @@
   });
   ids.agentDetailModal.addEventListener('click', (e) => {
     if (e.target === ids.agentDetailModal) ids.agentDetailModal.style.display = 'none';
+  });
+
+  // ── Metrics summary modal ─────────────────────
+  ids.closeMetricsSummaryBtn.addEventListener('click', () => {
+    ids.metricsSummaryModal.style.display = 'none';
+  });
+  ids.metricsSummaryModal.addEventListener('click', (e) => {
+    if (e.target === ids.metricsSummaryModal) ids.metricsSummaryModal.style.display = 'none';
+  });
+  ids.sidebarFooter.addEventListener('click', (e) => {
+    if (e.target.closest('#openMetricsSummary')) showMetricsSummary();
   });
   ids.agentList.addEventListener('click', (e) => {
     const link = e.target.closest('.agent-name-link');
@@ -1025,6 +1122,58 @@
         select.appendChild(opt);
       });
       if (current) select.value = current;
+    });
+    renderSequentialOrder();
+  }
+
+  function renderSequentialOrder() {
+    if (!ids.sequentialOrder) return;
+    const enabledAgents = state.agents.filter((a) => a.enabled);
+    if (!enabledAgents.length) {
+      ids.sequentialOrder.innerHTML = '<span class="status">No agents online.</span>';
+      return;
+    }
+    // Sync sequentialOrder with enabled agents
+    const enabledIds = new Set(enabledAgents.map((a) => a.id));
+    state.sequentialOrder = state.sequentialOrder.filter((id) => enabledIds.has(id));
+    enabledAgents.forEach((a) => {
+      if (!state.sequentialOrder.includes(a.id)) state.sequentialOrder.push(a.id);
+    });
+
+    ids.sequentialOrder.innerHTML = '';
+    state.sequentialOrder.forEach((agentId, idx) => {
+      const agent = state.agents.find((a) => a.id === agentId);
+      if (!agent) return;
+      const row = document.createElement('div');
+      row.className = 'seq-order-item';
+      const color = getAgentColor(agent.id);
+      row.innerHTML = `<span class="seq-order-num">${idx + 1}</span><span class="agent-color-dot" style="background:${color}"></span><span class="seq-order-name">${agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>`;
+      const btns = document.createElement('span');
+      btns.className = 'seq-order-btns';
+      if (idx > 0) {
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.textContent = '\u25B2';
+        up.title = 'Move up';
+        up.addEventListener('click', () => {
+          [state.sequentialOrder[idx - 1], state.sequentialOrder[idx]] = [state.sequentialOrder[idx], state.sequentialOrder[idx - 1]];
+          renderSequentialOrder();
+        });
+        btns.appendChild(up);
+      }
+      if (idx < state.sequentialOrder.length - 1) {
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.textContent = '\u25BC';
+        down.title = 'Move down';
+        down.addEventListener('click', () => {
+          [state.sequentialOrder[idx], state.sequentialOrder[idx + 1]] = [state.sequentialOrder[idx + 1], state.sequentialOrder[idx]];
+          renderSequentialOrder();
+        });
+        btns.appendChild(down);
+      }
+      row.appendChild(btns);
+      ids.sequentialOrder.appendChild(row);
     });
   }
 

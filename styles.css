@@ -160,6 +160,57 @@ button:hover {
   min-height: 0;
 }
 
+.sidebar-footer {
+  border-top: 1px solid var(--line);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.footer-stat {
+  display: block;
+  text-align: center;
+}
+
+.footer-stat.clickable-bubble {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Metrics summary table ───────────────────── */
+.metrics-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.metrics-summary-table th,
+.metrics-summary-table td {
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.metrics-summary-table th:first-child,
+.metrics-summary-table td:first-child {
+  text-align: left;
+}
+
+.metrics-summary-table thead th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metrics-totals-row td {
+  border-top: 2px solid var(--text);
+  border-bottom: none;
+}
+
 .trace-sidebar {
   position: fixed;
   top: 0;
@@ -267,6 +318,25 @@ button:hover {
   font-size: 0.78rem;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.trace-expand-btn {
+  width: auto;
+  padding: 0.1rem 0.4rem;
+  margin-top: 0.25rem;
+  font-size: 0.65rem;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 400;
+}
+
+.trace-expand-btn:hover {
+  background: var(--accent);
+  color: #fff;
 }
 
 /* sidebar overrides handled above */
@@ -392,7 +462,63 @@ button:hover {
 .badge-tool { background: #6366f1; }
 .badge-knowledge { background: #0891b2; }
 .badge-memory { background: #7c3aed; }
-.badge-guardrail { background: #dc2626; }\n.badge-metrics { background: #0d9488; }
+.badge-guardrail { background: #dc2626; }
+.badge-metrics { background: #f0fdf4; color: #166534; border: 1px solid #86efac; font-weight: 700; }
+
+/* ── Sequential order list ───────────────────── */
+.sequential-order {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+.seq-order-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--line);
+  background: #f9fafb;
+  font-size: 0.8rem;
+}
+
+.seq-order-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.seq-order-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seq-order-btns {
+  display: flex;
+  gap: 0.15rem;
+  flex-shrink: 0;
+}
+
+.seq-order-btns button {
+  width: auto;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.65rem;
+  line-height: 1;
+  min-width: 0;
+  letter-spacing: 0;
+}
 
 .agent-chat {
   margin-top: 0.4rem;
@@ -611,6 +737,18 @@ button:hover {
   box-shadow: 3px 3px 0 rgba(0,0,0,0.2);
 }
 
+.px-bubble:hover {
+  border-color: var(--agent-color, #1e293b);
+}
+
+.px-bubble:hover::after {
+  border-top-color: var(--agent-color, #1e293b);
+}
+
+.px-bubble:hover::before {
+  border-top-color: var(--agent-color, #fff);
+}
+
 .px-bubble.thinking {
   animation: thinking-pulse 1.5s ease-in-out infinite;
 }
@@ -620,7 +758,7 @@ button:hover {
 }
 
 .clickable-bubble:hover {
-  border-color: var(--accent);
+  border-color: var(--agent-color, var(--accent));
 }
 
 .trace-highlight {
