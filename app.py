@@ -12,7 +12,7 @@ APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 load_dotenv(os.path.join(APP_ROOT, ".env"), override=True)
 
-FOUNDRY_SCOPE = os.getenv("FOUNDRY_SCOPE", "https://ai.azure.com/.default")
+FOUNDRY_SCOPE = os.getenv("FOUNDRY_SCOPE", "https://ai.azure.com")
 FOUNDRY_PROJECT_ENDPOINT = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").rstrip("/")
 FOUNDRY_MODEL_DEPLOYMENT = os.getenv("FOUNDRY_MODEL_DEPLOYMENT", "")
 FOUNDRY_API_VERSION = os.getenv("FOUNDRY_API_VERSION", "v1")
@@ -28,8 +28,9 @@ def foundry_request(path: str, method: str, body: Optional[Dict[str, Any]] = Non
 
     token = credential.get_token(FOUNDRY_SCOPE).token
     url = f"{FOUNDRY_PROJECT_ENDPOINT}{path}"
-    separator = "&" if "?" in url else "?"
-    url = f"{url}{separator}api-version={FOUNDRY_API_VERSION}"
+    if "/v1/" not in path:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}api-version={FOUNDRY_API_VERSION}"
 
     response = requests.request(
         method,
@@ -68,9 +69,28 @@ def styles_css() -> Any:
     return send_from_directory(APP_ROOT, "styles.css")
 
 
+@app.route("/assets/<path:filename>")
+def serve_assets(filename: str) -> Any:
+    return send_from_directory(os.path.join(APP_ROOT, "assets"), filename)
+
+
 @app.route("/favicon.ico")
 def favicon() -> Any:
     return ("", 204)
+
+
+@app.get("/api/agents")
+def list_agents() -> Any:
+    if not FOUNDRY_PROJECT_ENDPOINT:
+        return jsonify({"error": "FOUNDRY_PROJECT_ENDPOINT is not configured."}), 500
+    try:
+        result = foundry_request("/agents", "GET")
+    except Exception as exc:
+        return jsonify({"error": f"Failed to list agents: {exc}"}), 502
+    agents = result.get("data", []) if isinstance(result, dict) else []
+    return jsonify(
+        [{"id": a.get("id"), "name": a.get("name")} for a in agents]
+    )
 
 
 @app.post("/api/agents")

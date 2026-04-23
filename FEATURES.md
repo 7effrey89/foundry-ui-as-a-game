@@ -1,20 +1,27 @@
 # Features
 
 ## Experience
-- Pixel-styled office scene with desks and sprite characters.
-- Player avatar speaks via a bubble over their desk.
-- NPC agents appear at desks when created and switch between awake/sleeping states.
+- Isometric pixel-art office displayed as a pre-rendered background image.
+- Name labels and speech bubbles overlay the background at desk positions.
+- Status dots (blue = user, green = awake, amber = napping, grey = empty) indicate desk state.
+- Player avatar and NPC agents appear at designated desk hotspots.
+- NPC agents switch between awake and sleeping visual states.
 
 ## Agents and Workflow
 - Create NPCs that map to Azure AI Foundry agents.
-- Group workflow: all enabled agents respond.
+- Load existing Foundry agents from the server into the NPC list.
+- Chat directly with a specific agent via the per-agent input field.
+- Group workflow: all enabled agents respond to a broadcast message.
 - Sequential workflow: enabled agents respond in order and pass context.
 - Enable/disable agents to control which desks are online.
 
 ## Server-Side Foundry Integration
 - Flask backend handles Foundry API requests.
+- `GET /api/agents` lists existing Foundry agents.
+- `POST /api/agents` creates a new Foundry agent.
+- `POST /api/messages` sends a message to a specific agent.
 - Uses Azure `DefaultAzureCredential` for Entra authentication without API keys.
-- Configurable token scope via `FOUNDRY_SCOPE` (defaults to `https://ai.azure.com/.default`).
+- Configurable token scope via `FOUNDRY_SCOPE` (defaults to `https://ai.azure.com`).
 - Agent creation uses the new Foundry Agents API (`api-version=v1`) with `definition.kind=prompt`.
 - Messaging uses the OpenAI-compatible `/openai/v1/responses` endpoint with `agent_reference`.
 

@@ -12,7 +12,7 @@ def make_client():
 
 
 def test_foundry_scope_defaults_to_ai_azure():
-    assert target.FOUNDRY_SCOPE == "https://ai.azure.com/.default"
+    assert target.FOUNDRY_SCOPE == "https://ai.azure.com"
 
 
 def test_foundry_scope_configurable(monkeypatch):
@@ -25,7 +25,7 @@ def test_foundry_request_uses_scope(monkeypatch):
     """foundry_request passes FOUNDRY_SCOPE to credential.get_token."""
     monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
     monkeypatch.setattr(target, "FOUNDRY_API_VERSION", "v1")
-    monkeypatch.setattr(target, "FOUNDRY_SCOPE", "https://ai.azure.com/.default")
+    monkeypatch.setattr(target, "FOUNDRY_SCOPE", "https://ai.azure.com")
 
     captured_scope = {}
 
@@ -50,7 +50,7 @@ def test_foundry_request_uses_scope(monkeypatch):
     monkeypatch.setattr(target.requests, "request", lambda *a, **kw: FakeResponse())
 
     target.foundry_request("/test", "GET")
-    assert captured_scope["scope"] == "https://ai.azure.com/.default"
+    assert captured_scope["scope"] == "https://ai.azure.com"
 
 
 # --- API version tests ---
@@ -93,7 +93,138 @@ def test_foundry_request_appends_api_version(monkeypatch):
     assert "api-version=v1" in captured_url["url"]
 
 
+def test_foundry_request_skips_api_version_for_v1_path(monkeypatch):
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
+    monkeypatch.setattr(target, "FOUNDRY_API_VERSION", "v1")
+
+    class FakeToken:
+        token = "fake-token"
+
+    class FakeCredential:
+        def get_token(self, scope):
+            return FakeToken()
+
+    monkeypatch.setattr(target, "credential", FakeCredential())
+
+    captured_url = {}
+
+    class FakeResponse:
+        ok = True
+        status_code = 200
+        text = "{}"
+        headers = {"content-type": "application/json"}
+        def json(self):
+            return {}
+
+    def fake_request(method, url, **kwargs):
+        captured_url["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(target.requests, "request", fake_request)
+
+    target.foundry_request("/openai/v1/responses", "POST")
+    assert "api-version" not in captured_url["url"]
+
+
 # --- Create agent tests ---
+
+
+def test_list_agents_returns_array(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
+
+    def fake_foundry_request(path, method, body=None):
+        return {
+            "data": [
+                {"id": "a1", "name": "Agent One"},
+                {"id": "a2", "name": "Agent Two"},
+            ]
+        }
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.get("/api/agents")
+    data = response.get_json()
+    assert response.status_code == 200
+    assert len(data) == 2
+    assert data[0]["id"] == "a1"
+    assert data[1]["name"] == "Agent Two"
+
+
+def test_list_agents_returns_three(monkeypatch):
+    """Listing agents returns at least 3 entries from the Foundry data key."""
+    client = make_client()
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
+
+    def fake_foundry_request(path, method, body=None):
+        return {
+            "data": [
+                {"id": "a1", "name": "Agent One"},
+                {"id": "a2", "name": "Agent Two"},
+                {"id": "a3", "name": "Agent Three"},
+            ]
+        }
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.get("/api/agents")
+    data = response.get_json()
+    assert response.status_code == 200
+    assert len(data) >= 3
+    assert data[0]["id"] == "a1"
+    assert data[1]["id"] == "a2"
+    assert data[2]["id"] == "a3"
+
+
+def test_list_agents_empty(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
+
+    def fake_foundry_request(path, method, body=None):
+        return {"data": []}
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.get("/api/agents")
+    assert response.status_code == 200
+    assert response.get_json() == []
+
+
+def test_list_agents_handles_non_dict(monkeypatch):
+    client = make_client()
+
+    def fake_foundry_request(path, method, body=None):
+        return None
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
+
+    response = client.get("/api/agents")
+    assert response.status_code == 200
+    assert response.get_json() == []
+
+
+def test_list_agents_missing_endpoint(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "")
+
+    response = client.get("/api/agents")
+    assert response.status_code == 500
+    assert "FOUNDRY_PROJECT_ENDPOINT" in response.get_json()["error"]
+
+
+def test_list_agents_foundry_error(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
+
+    def fake_foundry_request(path, method, body=None):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.get("/api/agents")
+    assert response.status_code == 502
+    assert "Failed to list agents" in response.get_json()["error"]
 
 
 def test_create_agent_requires_name_and_instructions():
@@ -235,3 +366,13 @@ def test_send_message_no_response(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["response"] == "No response received from agent."
+
+
+# --- Assets route tests ---
+
+
+def test_serve_assets_returns_file():
+    client = make_client()
+    response = client.get("/assets/img/2026-04-23%20125726-gpt-image-1_5.png")
+    assert response.status_code == 200
+    assert response.content_type.startswith("image/")
