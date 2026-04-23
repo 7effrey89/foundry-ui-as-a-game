@@ -13,14 +13,23 @@
 
   const API_BASE = '/api';
 
-  const DESKS = [
-    { x: 155, y: 290 },
-    { x: 310, y: 290 },
-    { x: 560, y: 290 },
-    { x: 155, y: 420 },
-    { x: 310, y: 420 },
-    { x: 560, y: 420 }
+  // Desk positions as fractions of the 1024×1024 source image (head positions)
+  // Agent i → desk (i+1)%6, person overlay (i+1).png
+  const DESK_IMG = [
+    { ix: 0.68, iy: 0.56 },  // desk 0: person 6.png head (front-right)
+    { ix: 0.30, iy: 0.29 },  // desk 1: person 1.png head (back-left)
+    { ix: 0.49, iy: 0.27 },  // desk 2: person 2.png head (back-center)
+    { ix: 0.26, iy: 0.54 },  // desk 3: person 3.png head (front-left)
+    { ix: 0.48, iy: 0.41 },  // desk 4: person 4.png head (center)
+    { ix: 0.80, iy: 0.33 }   // desk 5: person 5.png head (back-right)
   ];
+
+  function getDesks() {
+    return DESK_IMG.map(({ ix, iy }) => ({
+      pctX: (ix * 100 - 5).toFixed(2),
+      pctY: (iy * 100 - 3).toFixed(2)
+    }));
+  }
 
   const THINKING_PHRASES = [
     'Thinking...', 'Looking at tools...',
@@ -31,6 +40,7 @@
   ];
 
   const DOT_SEQUENCE = ['.', '..', '...'];
+  const MAX_ENABLED_AGENTS = 5;
   const MAX_TRACE_ENTRIES = 300;
 
   function startThinking(agentId) {
@@ -165,7 +175,8 @@
   }
 
   function getDeskForAgent(index) {
-    return DESKS[(index + 1) % DESKS.length];
+    const desks = getDesks();
+    return desks[(index + 1) % desks.length];
   }
 
   function shortText(value, max = 140) {
@@ -303,11 +314,11 @@
     });
   }
 
-  function createDeskElement({ x, y }, label, spriteClass, bubbleText, agentId) {
+  function createDeskElement(pos, label, spriteClass, bubbleText, agentId) {
     const desk = document.createElement('div');
     desk.className = 'iso-desk';
-    desk.style.left = `${x}px`;
-    desk.style.top = `${y}px`;
+    desk.style.left = `${pos.pctX}%`;
+    desk.style.top = `${pos.pctY}%`;
 
     const name = document.createElement('div');
     name.className = 'iso-label';
@@ -335,29 +346,29 @@
     const scene = document.createElement('div');
     scene.className = 'iso-scene';
 
-    // Person image layers (1.png through 6.png)
-    state.agents.forEach((agent, index) => {
-      if (index >= 6) return;
+    // Only enabled agents get desks and person overlays (max 5)
+    const enabledAgents = state.agents.filter((a) => a.enabled).slice(0, MAX_ENABLED_AGENTS);
+    const desks = getDesks();
+
+    // Person image layers (1.png through 6.png) — assigned dynamically to enabled agents
+    enabledAgents.forEach((agent, slot) => {
       const img = document.createElement('img');
-      img.src = `assets/img/${index + 1}.png`;
-      img.className = 'person-layer' + (agent.enabled ? '' : ' hidden');
+      img.src = `assets/img/${slot + 1}.png`;
+      img.className = 'person-layer';
       img.alt = agent.name;
       scene.appendChild(img);
     });
 
-    // Desks (overlay labels + bubbles on background image)
-    const userDesk = DESKS[state.user.deskIndex];
-    scene.appendChild(createDeskElement(userDesk, state.user.name, 'user', state.user.speech));
-
-    state.agents.forEach((agent, index) => {
-      const desk = getDeskForAgent(index);
-      const spriteClass = agent.enabled ? 'awake' : 'nap';
-      const bubble = agent.enabled ? (agent.bubbleSpeech || agent.lastSpeech) : 'Zzz...';
-      scene.appendChild(createDeskElement(desk, agent.name, spriteClass, bubble, agent.id));
+    // Desks (overlay labels + bubbles)
+    enabledAgents.forEach((agent, slot) => {
+      const desk = desks[(slot + 1) % desks.length];
+      const bubble = agent.bubbleSpeech || agent.lastSpeech || '';
+      scene.appendChild(createDeskElement(desk, agent.name, 'awake', bubble, agent.id));
     });
 
-    for (let i = state.agents.length + 1; i < DESKS.length; i += 1) {
-      scene.appendChild(createDeskElement(DESKS[i], 'Empty Seat', 'empty'));
+    // Fill remaining desks as empty
+    for (let i = enabledAgents.length + 1; i < desks.length; i += 1) {
+      scene.appendChild(createDeskElement(desks[i], 'Empty Seat', 'empty'));
     }
 
     ids.office.appendChild(scene);
@@ -513,7 +524,7 @@
             knowledge: ra.knowledge || [],
             memory: ra.memory || [],
             guardrail: ra.guardrail || '',
-            enabled: true,
+            enabled: state.agents.filter((a) => a.enabled).length + added < MAX_ENABLED_AGENTS,
             lastSpeech: 'Ready to help!',
             bubbleSpeech: ''
           });
@@ -554,6 +565,14 @@
       return;
     }
 
+    if (target.checked) {
+      const enabledCount = state.agents.filter((a) => a.enabled).length;
+      if (enabledCount >= MAX_ENABLED_AGENTS) {
+        target.checked = false;
+        setLog(`Max ${MAX_ENABLED_AGENTS} agents can be online at once.`);
+        return;
+      }
+    }
     agent.enabled = target.checked;
     renderAgentsPanel();
     renderOffice();

@@ -8,35 +8,15 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <main class="app">
-      <header>
-        <h1>Foundry UI as a Game</h1>
-        <p class="subtitle">Pixel-style office for visual multi-agent demos</p>
-      </header>
+    <aside class="agents-sidebar">
+      <div class="sidebar-head">
+        <strong>Agents</strong>
+        <button id="loadAgentsBtn" type="button">Reload</button>
+      </div>
+      <div id="agentList" class="agent-list"></div>
+    </aside>
 
-      <section class="panel auth-panel">
-        <h2>1) Server Configuration</h2>
-        <p class="status">
-          This app now authenticates with Azure using DefaultAzureCredential on the Flask server.
-        </p>
-        <div class="grid two-col">
-          <div>
-            <strong>Required env vars</strong>
-            <ul>
-              <li>FOUNDRY_PROJECT_ENDPOINT</li>
-              <li>FOUNDRY_MODEL_DEPLOYMENT</li>
-              <li>FOUNDRY_API_VERSION (optional)</li>
-            </ul>
-          </div>
-          <div>
-            <strong>Auth options</strong>
-            <ul>
-              <li>Azure CLI: <code>az login</code></li>
-              <li>Managed Identity / Workload Identity</li>
-            </ul>
-          </div>
-        </div>
-      </section>
+    <main class="app">
 
       <section class="panel control-panel">
         <h2>2) Agents, Workflow, and Messaging</h2>
@@ -64,27 +44,11 @@
                 <option value="append_history">Append prior context and response</option>
               </select>
             </label>
-            <small>Disabled agents go to sleep at their desk.</small>
-            <button id="loadAgentsBtn" style="margin-top:0.5rem">Load Existing Foundry Agents</button>
-          </fieldset>
         </div>
 
         <div class="row message-row">
           <input id="userMessage" placeholder="Type what your character says to the office..." />
           <button id="sendMessageBtn">Speak to All</button>
-        </div>
-
-        <div class="control-layout">
-          <div>
-            <div id="agentList" class="agent-list"></div>
-          </div>
-          <aside class="trace-sidebar">
-            <div class="trace-head">
-              <strong>Agent Trace</strong>
-              <button id="clearTraceBtn" type="button">Clear</button>
-            </div>
-            <div id="traceList" class="trace-list"></div>
-          </aside>
         </div>
         <p id="eventLog" class="log"></p>
       </section>
@@ -94,5 +58,13 @@
         <div id="office" class="office"></div>
       </section>
     </main>
+
+    <aside class="trace-sidebar">
+      <div class="trace-head">
+        <strong>Agent Trace</strong>
+        <button id="clearTraceBtn" type="button">Clear</button>
+      </div>
+      <div id="traceList" class="trace-list"></div>
+    </aside>
   </body>
 </html>
