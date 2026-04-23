@@ -140,9 +140,22 @@
       const escapedName = agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;');
       const escapedSpeech = (agent.lastSpeech || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
+      function badges(label, items, cls) {
+        if (!items || !items.length) return '';
+        return items.map((t) => `<span class="badge ${cls}">${label}: ${t.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>`).join(' ');
+      }
+
+      const badgeHtml = [
+        badges('🔧', agent.tools, 'badge-tool'),
+        badges('📚', agent.knowledge, 'badge-knowledge'),
+        badges('🧠', agent.memory, 'badge-memory'),
+        agent.guardrail ? `<span class="badge badge-guardrail">🛡️ ${agent.guardrail.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>` : ''
+      ].filter(Boolean).join(' ');
+
       card.innerHTML = `
         <div class="agent-name">${escapedName}</div>
         <div class="status">${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</div>
+        ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
         <label>
           <input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" />
           Enabled
@@ -297,7 +310,8 @@
 
   ids.createNpcBtn.addEventListener('click', handleCreateNpc);
   ids.sendMessageBtn.addEventListener('click', handleSendMessage);
-  ids.loadAgentsBtn.addEventListener('click', async () => {
+
+  async function loadAgents() {
     try {
       setLog('Loading existing Foundry agents...');
       const remoteAgents = await fetchAgents();
@@ -318,6 +332,10 @@
             description: '',
             foundryAgentId: ra.id,
             foundryAgentName: ra.name,
+            tools: ra.tools || [],
+            knowledge: ra.knowledge || [],
+            memory: ra.memory || [],
+            guardrail: ra.guardrail || '',
             enabled: true,
             lastSpeech: 'Ready to help!'
           });
@@ -330,7 +348,9 @@
     } catch (error) {
       setLog(error.message);
     }
-  });
+  }
+
+  ids.loadAgentsBtn.addEventListener('click', loadAgents);
   ids.workflowMode.addEventListener('change', () => {
     state.workflowMode = ids.workflowMode.value;
     setLog(`Workflow set to ${state.workflowMode}.`);
@@ -371,4 +391,5 @@
 
   renderAgentsPanel();
   renderOffice();
+  loadAgents();
 })();

@@ -88,9 +88,38 @@ def list_agents() -> Any:
     except Exception as exc:
         return jsonify({"error": f"Failed to list agents: {exc}"}), 502
     agents = result.get("data", []) if isinstance(result, dict) else []
-    return jsonify(
-        [{"id": a.get("id"), "name": a.get("name")} for a in agents]
-    )
+    out = []
+    for a in agents:
+        ver = (a.get("versions") or {}).get("latest") or {}
+        defn = ver.get("definition") or {}
+        tools_raw = defn.get("tools") or []
+
+        tools = []
+        knowledge = []
+        memory = []
+        for t in tools_raw:
+            ttype = t.get("type", "")
+            if ttype == "mcp":
+                knowledge.append(t.get("server_label") or "knowledge")
+            elif ttype == "memory_search_preview":
+                memory.append(t.get("memory_store_name") or "memory")
+            else:
+                tools.append(ttype)
+
+        rai = defn.get("rai_config") or {}
+        guardrail = rai.get("rai_policy_name") or ""
+        if "/" in guardrail:
+            guardrail = guardrail.rsplit("/", 1)[-1]
+
+        out.append({
+            "id": a.get("id"),
+            "name": a.get("name"),
+            "tools": tools,
+            "knowledge": knowledge,
+            "memory": memory,
+            "guardrail": guardrail,
+        })
+    return jsonify(out)
 
 
 @app.post("/api/agents")

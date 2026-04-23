@@ -136,8 +136,8 @@ def test_list_agents_returns_array(monkeypatch):
     def fake_foundry_request(path, method, body=None):
         return {
             "data": [
-                {"id": "a1", "name": "Agent One"},
-                {"id": "a2", "name": "Agent Two"},
+                {"id": "a1", "name": "Agent One", "versions": {"latest": {"definition": {}}}},
+                {"id": "a2", "name": "Agent Two", "versions": {"latest": {"definition": {}}}},
             ]
         }
 
@@ -149,6 +149,10 @@ def test_list_agents_returns_array(monkeypatch):
     assert len(data) == 2
     assert data[0]["id"] == "a1"
     assert data[1]["name"] == "Agent Two"
+    assert data[0]["tools"] == []
+    assert data[0]["knowledge"] == []
+    assert data[0]["memory"] == []
+    assert data[0]["guardrail"] == ""
 
 
 def test_list_agents_returns_three(monkeypatch):
@@ -159,9 +163,9 @@ def test_list_agents_returns_three(monkeypatch):
     def fake_foundry_request(path, method, body=None):
         return {
             "data": [
-                {"id": "a1", "name": "Agent One"},
-                {"id": "a2", "name": "Agent Two"},
-                {"id": "a3", "name": "Agent Three"},
+                {"id": "a1", "name": "Agent One", "versions": {"latest": {"definition": {}}}},
+                {"id": "a2", "name": "Agent Two", "versions": {"latest": {"definition": {}}}},
+                {"id": "a3", "name": "Agent Three", "versions": {"latest": {"definition": {}}}},
             ]
         }
 
@@ -174,6 +178,47 @@ def test_list_agents_returns_three(monkeypatch):
     assert data[0]["id"] == "a1"
     assert data[1]["id"] == "a2"
     assert data[2]["id"] == "a3"
+
+
+def test_list_agents_extracts_tools_knowledge_memory_guardrail(monkeypatch):
+    client = make_client()
+    monkeypatch.setattr(target, "FOUNDRY_PROJECT_ENDPOINT", "https://example.com")
+
+    def fake_foundry_request(path, method, body=None):
+        return {
+            "data": [
+                {
+                    "id": "rich",
+                    "name": "RichAgent",
+                    "versions": {
+                        "latest": {
+                            "definition": {
+                                "tools": [
+                                    {"type": "web_search"},
+                                    {"type": "code_interpreter", "container": {"type": "auto"}},
+                                    {"type": "mcp", "server_label": "my_kb"},
+                                    {"type": "memory_search_preview", "memory_store_name": "store1"},
+                                ],
+                                "rai_config": {
+                                    "rai_policy_name": "/subs/123/raiPolicies/MyGuardrail"
+                                },
+                            }
+                        }
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.get("/api/agents")
+    data = response.get_json()
+    assert response.status_code == 200
+    agent = data[0]
+    assert agent["tools"] == ["web_search", "code_interpreter"]
+    assert agent["knowledge"] == ["my_kb"]
+    assert agent["memory"] == ["store1"]
+    assert agent["guardrail"] == "MyGuardrail"
 
 
 def test_list_agents_empty(monkeypatch):

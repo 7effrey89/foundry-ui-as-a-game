@@ -95,6 +95,12 @@ button:hover {
 
 .message-row input {
   flex: 1;
+  min-width: 0;
+}
+
+.message-row button {
+  width: auto;
+  white-space: nowrap;
 }
 
 .agent-list {
@@ -114,6 +120,26 @@ button:hover {
 .agent-name {
   font-weight: 700;
 }
+
+.agent-badges {
+  margin-top: 0.3rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: #fff;
+}
+
+.badge-tool { background: #6366f1; }
+.badge-knowledge { background: #0891b2; }
+.badge-memory { background: #7c3aed; }
+.badge-guardrail { background: #dc2626; }
 
 .agent-chat {
   margin-top: 0.4rem;

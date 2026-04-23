@@ -10,6 +10,7 @@
 ## Agents and Workflow
 - Create NPCs that map to Azure AI Foundry agents.
 - Load existing Foundry agents from the server into the NPC list.
+- Agent cards display attached tools, knowledge sources, memory stores, and guardrails as colored badges.
 - Chat directly with a specific agent via the per-agent input field.
 - Group workflow: all enabled agents respond to a broadcast message.
 - Sequential workflow: enabled agents respond in order and pass context.
