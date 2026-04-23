@@ -182,8 +182,18 @@ button:hover {
 
 .trace-item {
   border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
   background: #fff;
   padding: 0.35rem;
+}
+
+.trace-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 0.3rem;
+  vertical-align: middle;
 }
 
 .trace-meta {
@@ -215,9 +225,19 @@ button:hover {
 
 .agent-card {
   border: 2px solid var(--line);
+  border-left: 4px solid var(--accent);
   border-radius: 0;
   padding: 0.55rem;
   background: #f9fafb;
+}
+
+.agent-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.35rem;
+  vertical-align: middle;
 }
 
 .agent-name {
@@ -319,7 +339,7 @@ button:hover {
 /* ── Name label ──────────────────────────────── */
 .iso-label {
   position: absolute;
-  top: -2px;
+  bottom: -2px;
   left: -10px;
   right: -10px;
   text-align: center;
@@ -334,6 +354,10 @@ button:hover {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   font-family: "Courier New", monospace;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 /* ── Speech bubble ───────────────────────────── */
@@ -381,19 +405,100 @@ button:hover {
   z-index: 1;
 }
 
-/* ── Status dot on desk ──────────────────────── */
+/* ── Status dot (inline in label) ──────────────────────── */
 .desk-status {
-  position: absolute;
-  bottom: 4px;
-  right: 4px;
-  width: 10px;
-  height: 10px;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   border: 2px solid rgba(0,0,0,0.3);
-  z-index: 10;
+  flex-shrink: 0;
 }
 
 .desk-status.awake { background: #22c55e; }
 .desk-status.nap   { background: #f59e0b; }
 .desk-status.user  { background: #3b82f6; }
 .desk-status.empty { background: #64748b; }
+
+/* ── Empty seat clickable ────────────────────── */
+.iso-desk.empty-desk {
+  cursor: pointer;
+}
+
+.iso-desk.empty-desk:hover .iso-label {
+  color: #facc15;
+}
+
+.seat-assign-dropdown {
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100%);
+  background: #fff;
+  border: 2px solid #1e293b;
+  z-index: 30;
+  min-width: 120px;
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.2);
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+}
+
+.seat-assign-dropdown .seat-option {
+  padding: 4px 8px;
+  cursor: pointer;
+  color: #1f2937;
+  white-space: nowrap;
+}
+
+.seat-assign-dropdown .seat-option:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.seat-assign-dropdown .seat-option.no-agents {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* ── Orchestration info & config ─────────────── */
+
+.orchestration-info {
+  background: #f0f7ff;
+  border: 2px solid var(--accent);
+  padding: 0.6rem;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.orchestration-info .info-label {
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.2rem;
+}
+
+.orchestration-info .info-pattern {
+  font-family: "Courier New", monospace;
+  background: #fff;
+  padding: 0.3rem;
+  margin: 0.3rem 0;
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+}
+
+.orchestration-info .info-use-case {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.orchestration-info a {
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+
+.orchestration-config {
+  margin-top: 0.5rem;
+}

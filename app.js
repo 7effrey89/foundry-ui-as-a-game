@@ -5,8 +5,11 @@
       speech: 'Hello office!',
       deskIndex: 0
     },
-    workflowMode: 'group',
+    workflowMode: 'concurrent',
     handoffMode: 'previous_response',
+    maxRounds: 3,
+    triageAgentId: '',
+    managerAgentId: '',
     trace: [],
     agents: []
   };
@@ -40,8 +43,57 @@
   ];
 
   const DOT_SEQUENCE = ['.', '..', '...'];
-  const MAX_ENABLED_AGENTS = 5;
+  const MAX_ENABLED_AGENTS = 6;
   const MAX_TRACE_ENTRIES = 300;
+
+  const AGENT_COLORS = [
+    '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
+    '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#06b6d4'
+  ];
+
+  function getAgentColor(agentId) {
+    const idx = state.agents.findIndex((a) => a.id === agentId);
+    if (idx < 0) return '#6b7280';
+    return AGENT_COLORS[idx % AGENT_COLORS.length];
+  }
+
+  const ORCHESTRATION_INFO = {
+    concurrent: {
+      name: 'Concurrent',
+      summary: 'All agents process the same message simultaneously and independently. Results are collected from every agent.',
+      pattern: 'Fan-out \u2192 [Agent A | Agent B | Agent C] \u2192 Collect results',
+      useCase: 'Brainstorming, diverse perspectives, ensemble reasoning, voting',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/concurrent'
+    },
+    sequential: {
+      name: 'Sequential',
+      summary: 'Agents execute one after another in a pipeline. Each agent builds on the previous agent\u2019s output.',
+      pattern: 'Pipeline \u2192 Agent A \u2192 Agent B \u2192 Agent C \u2192 Final',
+      useCase: 'Document review, data processing pipelines, multi-stage reasoning',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/sequential'
+    },
+    handoff: {
+      name: 'Handoff',
+      summary: 'A triage agent routes conversations to specialist agents based on context. Agents transfer control to each other dynamically.',
+      pattern: 'Mesh \u2192 Triage \u21c4 Specialist A \u21c4 Specialist B',
+      useCase: 'Customer support, expert systems, dynamic delegation',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/handoff'
+    },
+    group_chat: {
+      name: 'Group Chat',
+      summary: 'Agents take turns in a shared conversation (round-robin). Each sees the full history and can refine prior work.',
+      pattern: 'Star \u2192 [A \u2192 B \u2192 A \u2192 B \u2026] (N rounds)',
+      useCase: 'Iterative refinement, collaborative problem-solving, writer-reviewer workflows',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/group-chat'
+    },
+    magentic: {
+      name: 'Magentic',
+      summary: 'A manager agent dynamically plans and delegates tasks to specialized worker agents, coordinating the overall workflow.',
+      pattern: 'Hub \u2192 Manager \u21c4 Worker A, Manager \u21c4 Worker B',
+      useCase: 'Complex planning, research tasks, multi-step problem solving',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/magentic'
+    }
+  };
 
   function startThinking(agentId) {
     let tick = 0;
@@ -78,7 +130,15 @@
     office: document.getElementById('office'),
     eventLog: document.getElementById('eventLog'),
     traceList: document.getElementById('traceList'),
-    clearTraceBtn: document.getElementById('clearTraceBtn')
+    clearTraceBtn: document.getElementById('clearTraceBtn'),
+    orchestrationInfo: document.getElementById('orchestrationInfo'),
+    sequentialConfig: document.getElementById('sequentialConfig'),
+    handoffConfig: document.getElementById('handoffConfig'),
+    groupChatConfig: document.getElementById('groupChatConfig'),
+    magenticConfig: document.getElementById('magenticConfig'),
+    triageAgent: document.getElementById('triageAgent'),
+    managerAgent: document.getElementById('managerAgent'),
+    maxRoundsInput: document.getElementById('maxRounds')
   };
 
   function setLog(message) {
@@ -129,11 +189,10 @@
     return { id: result.id, name: result.name || name };
   }
 
-  async function sendMessageToFoundryAgent(agent, message) {
-    return foundryRequest('/messages', 'POST', {
-      agentName: agent.foundryAgentName,
-      message
-    });
+  async function sendMessageToFoundryAgent(agent, message, context) {
+    const body = { agentName: agent.foundryAgentName, message };
+    if (context && context.length) { body.context = context; }
+    return foundryRequest('/messages', 'POST', body);
   }
 
   async function fetchAgents() {
@@ -203,10 +262,13 @@
     state.trace.forEach((entry) => {
       const item = document.createElement('article');
       item.className = 'trace-item';
+      const color = entry.agentId === 'user' ? '#6b7280' : getAgentColor(entry.agentId);
+      item.style.borderLeftColor = color;
 
       const meta = document.createElement('div');
       meta.className = 'trace-meta';
-      meta.textContent = `${entry.time} • ${entry.agentName} • ${entry.type}`;
+      const dot = `<span class="trace-dot" style="background:${color}"></span>`;
+      meta.innerHTML = `${dot}${entry.time} \u2022 ${entry.agentName.replace(/&/g, '&amp;').replace(/</g, '&lt;')} \u2022 ${entry.type}`;
 
       const summary = document.createElement('div');
       summary.className = 'trace-summary';
@@ -255,7 +317,7 @@
     if (!latestForBubble) {
       latestForBubble = traceEntries[traceEntries.length - 1];
     }
-    const bubbleSummary = latestForBubble?.summary || latestForBubble?.text || '';
+    const bubbleSummary = latestForBubble?.text || latestForBubble?.summary || '';
     if (bubbleSummary) {
       agent.bubbleSpeech = shortText(bubbleSummary, 70);
     }
@@ -278,6 +340,8 @@
     state.agents.forEach((agent) => {
       const card = document.createElement('div');
       card.className = 'agent-card';
+      const agentColor = getAgentColor(agent.id);
+      card.style.borderLeftColor = agentColor;
 
       const escapedName = agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;');
       const escapedSpeech = (agent.lastSpeech || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -295,7 +359,7 @@
       ].filter(Boolean).join(' ');
 
       card.innerHTML = `
-        <div class="agent-name">${escapedName}</div>
+        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span>${escapedName}</div>
         <div class="status">${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</div>
         ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
         <label>
@@ -314,20 +378,26 @@
     });
   }
 
-  function createDeskElement(pos, label, spriteClass, bubbleText, agentId) {
+  function createDeskElement(pos, label, spriteClass, bubbleText, agentId, agentColor) {
     const desk = document.createElement('div');
     desk.className = 'iso-desk';
+    if (spriteClass === 'empty') desk.classList.add('empty-desk');
     desk.style.left = `${pos.pctX}%`;
     desk.style.top = `${pos.pctY}%`;
 
-    const name = document.createElement('div');
-    name.className = 'iso-label';
-    name.textContent = label;
-    desk.appendChild(name);
+    const nameRow = document.createElement('div');
+    nameRow.className = 'iso-label';
 
-    const dot = document.createElement('div');
+    const dot = document.createElement('span');
     dot.className = `desk-status ${spriteClass}`;
-    desk.appendChild(dot);
+    if (agentColor) dot.style.background = agentColor;
+    nameRow.appendChild(dot);
+
+    const text = document.createElement('span');
+    text.textContent = label;
+    nameRow.appendChild(text);
+
+    desk.appendChild(nameRow);
 
     if (bubbleText) {
       const bubble = document.createElement('div');
@@ -338,6 +408,62 @@
     }
 
     return desk;
+  }
+
+  function showSeatAssignDropdown(deskEl, slotIndex) {
+    // Remove any existing dropdown
+    const existing = document.querySelector('.seat-assign-dropdown');
+    if (existing) existing.remove();
+
+    const disabledAgents = state.agents.filter((a) => !a.enabled);
+    if (!disabledAgents.length) {
+      const dd = document.createElement('div');
+      dd.className = 'seat-assign-dropdown';
+      const item = document.createElement('div');
+      item.className = 'seat-option no-agents';
+      item.textContent = 'No available agents';
+      dd.appendChild(item);
+      deskEl.appendChild(dd);
+      setTimeout(() => dd.remove(), 2000);
+      return;
+    }
+
+    const dd = document.createElement('div');
+    dd.className = 'seat-assign-dropdown';
+
+    disabledAgents.forEach((agent) => {
+      const item = document.createElement('div');
+      item.className = 'seat-option';
+      const color = getAgentColor(agent.id);
+      item.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:4px;vertical-align:middle"></span>${agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;')}`;
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const enabledCount = state.agents.filter((a) => a.enabled).length;
+        if (enabledCount >= MAX_ENABLED_AGENTS) {
+          setLog(`Max ${MAX_ENABLED_AGENTS} agents can be online at once.`);
+          dd.remove();
+          return;
+        }
+        agent.enabled = true;
+        dd.remove();
+        renderAgentsPanel();
+        renderOffice();
+        populateAgentSelectors();
+        setLog(`${agent.name} assigned to desk and is now online.`);
+      });
+      dd.appendChild(item);
+    });
+
+    deskEl.appendChild(dd);
+
+    // Close on click outside
+    const closeHandler = (e) => {
+      if (!dd.contains(e.target) && !deskEl.contains(e.target)) {
+        dd.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 
   function renderOffice() {
@@ -360,15 +486,23 @@
     });
 
     // Desks (overlay labels + bubbles)
+    const usedDesks = new Set();
     enabledAgents.forEach((agent, slot) => {
-      const desk = desks[(slot + 1) % desks.length];
+      const deskIdx = (slot + 1) % desks.length;
+      usedDesks.add(deskIdx);
+      const desk = desks[deskIdx];
       const bubble = agent.bubbleSpeech || agent.lastSpeech || '';
-      scene.appendChild(createDeskElement(desk, agent.name, 'awake', bubble, agent.id));
+      const color = getAgentColor(agent.id);
+      scene.appendChild(createDeskElement(desk, agent.name, 'awake', bubble, agent.id, color));
     });
 
-    // Fill remaining desks as empty
-    for (let i = enabledAgents.length + 1; i < desks.length; i += 1) {
-      scene.appendChild(createDeskElement(desks[i], 'Empty Seat', 'empty'));
+    // Fill remaining desks as empty (clickable to assign)
+    for (let i = 0; i < desks.length; i += 1) {
+      if (usedDesks.has(i)) continue;
+      const emptyDesk = createDeskElement(desks[i], 'Empty Seat', 'empty');
+      const slotIndex = i;
+      emptyDesk.addEventListener('click', () => showSeatAssignDropdown(emptyDesk, slotIndex));
+      scene.appendChild(emptyDesk);
     }
 
     ids.office.appendChild(scene);
@@ -405,55 +539,44 @@
     }
   }
 
-  async function processMessageThroughWorkflow(message) {
-    const enabledAgents = state.agents.filter((a) => a.enabled);
-    if (!enabledAgents.length) {
-      setLog('No enabled agents are online.');
-      return;
-    }
-
-    if (state.workflowMode === 'group') {
-      const stopFns = enabledAgents.map((agent) => startThinking(agent.id));
-      const results = await Promise.allSettled(enabledAgents.map(async (agent, i) => {
-        addTrace({
-          agentName: agent.name,
-          agentId: agent.id,
-          type: 'workflow_dispatch',
-          summary: `Group dispatch: "${shortText(message)}"`
-        });
-        try {
-          const result = await sendMessageToFoundryAgent(agent, message);
-          stopFns[i]();
-          const response = result?.response || 'No response received from agent.';
-          agent.lastSpeech = response;
-          addTraceEntries(agent, result, 'group');
-          renderOffice();
-          renderAgentsPanel();
-        } catch (error) {
-          stopFns[i]();
-          throw new Error(`Agent ${agent.name} failed in group workflow: ${error.message}`);
-        }
-      }));
-
-      stopFns.forEach((fn) => fn());
-
-      const failures = results
-        .filter((result) => result.status === 'rejected')
-        .map((result) => result.reason.message);
-      if (failures.length) {
-        throw new Error(failures.join(' | '));
+  async function runConcurrent(message, enabledAgents) {
+    const stopFns = enabledAgents.map((agent) => startThinking(agent.id));
+    const results = await Promise.allSettled(enabledAgents.map(async (agent, i) => {
+      addTrace({
+        agentName: agent.name,
+        agentId: agent.id,
+        type: 'concurrent_dispatch',
+        summary: `Concurrent dispatch: "${shortText(message)}"`
+      });
+      try {
+        const result = await sendMessageToFoundryAgent(agent, message);
+        stopFns[i]();
+        const response = result?.response || 'No response received from agent.';
+        agent.lastSpeech = response;
+        addTraceEntries(agent, result, 'concurrent');
+        renderOffice();
+        renderAgentsPanel();
+      } catch (error) {
+        stopFns[i]();
+        throw new Error(`Agent ${agent.name} failed: ${error.message}`);
       }
-      return;
-    }
+    }));
+    stopFns.forEach((fn) => fn());
+    const failures = results
+      .filter((r) => r.status === 'rejected')
+      .map((r) => r.reason.message);
+    if (failures.length) throw new Error(failures.join(' | '));
+  }
 
+  async function runSequential(message, enabledAgents) {
     let rollingMessage = message;
     for (const agent of enabledAgents) {
       const stopThinking = startThinking(agent.id);
       addTrace({
         agentName: agent.name,
         agentId: agent.id,
-        type: 'handoff_in',
-        summary: `Sequential handoff (${state.handoffMode}): "${shortText(rollingMessage)}"`
+        type: 'sequential_step',
+        summary: `Sequential step (${state.handoffMode}): "${shortText(rollingMessage)}"`
       });
       try {
         const result = await sendMessageToFoundryAgent(agent, rollingMessage);
@@ -466,8 +589,210 @@
         renderAgentsPanel();
       } catch (error) {
         stopThinking();
-        throw new Error(`Agent ${agent.name} failed in sequential workflow: ${error.message}`);
+        throw new Error(`Agent ${agent.name} failed: ${error.message}`);
       }
+    }
+  }
+
+  async function runHandoff(message, enabledAgents) {
+    const triageAgent = enabledAgents.find((a) => a.id === state.triageAgentId) || enabledAgents[0];
+    const otherAgents = enabledAgents.filter((a) => a.id !== triageAgent.id);
+    const agentDirectory = otherAgents.map((a) => a.name).join(', ');
+    const MAX_HANDOFFS = 5;
+    let currentAgent = triageAgent;
+    let currentMessage = message;
+    if (otherAgents.length) {
+      currentMessage += '\n\n[You are part of a handoff workflow. Available specialist agents: ' + agentDirectory +
+        '. If this question needs a specialist, end your response with [HANDOFF:agent_name]. Otherwise respond normally.]';
+    }
+    const context = [];
+    for (let hop = 0; hop < MAX_HANDOFFS; hop++) {
+      const stopThinking = startThinking(currentAgent.id);
+      addTrace({
+        agentName: currentAgent.name,
+        agentId: currentAgent.id,
+        type: 'handoff_receive',
+        summary: `Handoff step ${hop + 1}: ${currentAgent.name} processing`
+      });
+      try {
+        const result = await sendMessageToFoundryAgent(currentAgent, currentMessage, context);
+        stopThinking();
+        const response = result?.response || 'No response received from agent.';
+        currentAgent.lastSpeech = response;
+        addTraceEntries(currentAgent, result, 'handoff');
+        renderOffice();
+        renderAgentsPanel();
+        const handoffMatch = response.match(/\[HANDOFF:([^\]]+)\]/i);
+        if (handoffMatch) {
+          const targetName = handoffMatch[1].trim();
+          const targetAgent = enabledAgents.find((a) =>
+            a.name.toLowerCase() === targetName.toLowerCase() ||
+            (a.foundryAgentName || '').toLowerCase() === targetName.toLowerCase()
+          );
+          if (targetAgent && targetAgent.id !== currentAgent.id) {
+            addTrace({
+              agentName: currentAgent.name,
+              agentId: currentAgent.id,
+              type: 'handoff_transfer',
+              summary: `${currentAgent.name} \u2192 ${targetAgent.name}`
+            });
+            context.push({ role: 'assistant', content: response });
+            const remaining = enabledAgents.filter((a) => a.id !== targetAgent.id).map((a) => a.name).join(', ');
+            currentMessage = message + '\n\n[You received a handoff. Prior agent said: ' +
+              response.replace(/\[HANDOFF:[^\]]+\]/gi, '').trim() +
+              (remaining ? '\nAvailable agents for further handoff: ' + remaining + '. End with [HANDOFF:agent_name] to transfer, or respond normally.]' : ']');
+            currentAgent = targetAgent;
+            continue;
+          }
+        }
+        break;
+      } catch (error) {
+        stopThinking();
+        throw new Error(`Agent ${currentAgent.name} failed: ${error.message}`);
+      }
+    }
+  }
+
+  async function runGroupChat(message, enabledAgents) {
+    const maxRounds = state.maxRounds || 3;
+    const conversation = [];
+    let roundMessage = message;
+    for (let round = 0; round < maxRounds; round++) {
+      for (const agent of enabledAgents) {
+        const stopThinking = startThinking(agent.id);
+        addTrace({
+          agentName: agent.name,
+          agentId: agent.id,
+          type: 'group_chat_turn',
+          summary: `Round ${round + 1}: ${agent.name}'s turn`
+        });
+        try {
+          const result = await sendMessageToFoundryAgent(agent, roundMessage, conversation);
+          stopThinking();
+          const response = result?.response || 'No response received from agent.';
+          agent.lastSpeech = response;
+          addTraceEntries(agent, result, 'group_chat');
+          conversation.push({ role: 'assistant', content: '[' + agent.name + ']: ' + response });
+          roundMessage = 'Continue the group discussion. Original task: ' + message;
+          renderOffice();
+          renderAgentsPanel();
+        } catch (error) {
+          stopThinking();
+          throw new Error(`Agent ${agent.name} failed: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  async function runMagentic(message, enabledAgents) {
+    const managerAgent = enabledAgents.find((a) => a.id === state.managerAgentId) || enabledAgents[0];
+    const workerAgents = enabledAgents.filter((a) => a.id !== managerAgent.id);
+    const workerNames = workerAgents.map((a) => a.name).join(', ');
+    const MAX_ITERATIONS = 5;
+    const context = [];
+    if (!workerAgents.length) {
+      const stopThinking = startThinking(managerAgent.id);
+      addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_solo', summary: 'Only one agent \u2014 running directly' });
+      try {
+        const result = await sendMessageToFoundryAgent(managerAgent, message);
+        stopThinking();
+        managerAgent.lastSpeech = result?.response || 'No response received from agent.';
+        addTraceEntries(managerAgent, result, 'magentic');
+        renderOffice();
+        renderAgentsPanel();
+      } catch (error) {
+        stopThinking();
+        throw new Error(`Agent ${managerAgent.name} failed: ${error.message}`);
+      }
+      return;
+    }
+    let managerMessage = message + '\n\n[You are a manager agent. Your workers: ' + workerNames +
+      '. Delegate by responding with [DELEGATE:agent_name:task description]. When finished, respond with [DONE] followed by the final answer.]';
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+      const stopThinking = startThinking(managerAgent.id);
+      addTrace({
+        agentName: managerAgent.name,
+        agentId: managerAgent.id,
+        type: 'magentic_plan',
+        summary: `Manager planning (iteration ${i + 1})`
+      });
+      try {
+        const result = await sendMessageToFoundryAgent(managerAgent, managerMessage, context);
+        stopThinking();
+        const response = result?.response || 'No response received from agent.';
+        managerAgent.lastSpeech = response;
+        addTraceEntries(managerAgent, result, 'magentic');
+        renderOffice();
+        renderAgentsPanel();
+        if (response.includes('[DONE]')) {
+          addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_done', summary: 'Manager declared workflow complete' });
+          managerAgent.lastSpeech = response.replace(/\[DONE\]/gi, '').trim();
+          renderOffice();
+          renderAgentsPanel();
+          break;
+        }
+        const delegateMatch = response.match(/\[DELEGATE:([^:]+):([^\]]+)\]/i);
+        if (delegateMatch) {
+          const workerName = delegateMatch[1].trim();
+          const task = delegateMatch[2].trim();
+          const worker = workerAgents.find((a) =>
+            a.name.toLowerCase() === workerName.toLowerCase() ||
+            (a.foundryAgentName || '').toLowerCase() === workerName.toLowerCase()
+          );
+          if (worker) {
+            addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_delegate', summary: `Manager \u2192 ${worker.name}: "${shortText(task)}"` });
+            const workerStop = startThinking(worker.id);
+            try {
+              const workerResult = await sendMessageToFoundryAgent(worker, task);
+              workerStop();
+              const workerResponse = workerResult?.response || 'No response received from agent.';
+              worker.lastSpeech = workerResponse;
+              addTraceEntries(worker, workerResult, 'magentic');
+              renderOffice();
+              renderAgentsPanel();
+              context.push({ role: 'assistant', content: response });
+              context.push({ role: 'user', content: 'Worker ' + worker.name + ' completed the task: ' + workerResponse });
+              managerMessage = 'Worker ' + worker.name + ' responded: "' + workerResponse +
+                '"\n\n[Continue coordinating. Workers: ' + workerNames + '. Use [DELEGATE:name:task] or [DONE] followed by the final answer.]';
+            } catch (error) {
+              workerStop();
+              throw new Error(`Worker ${worker.name} failed: ${error.message}`);
+            }
+          } else {
+            context.push({ role: 'assistant', content: response });
+            managerMessage = 'Worker "' + workerName + '" not found. Available: ' + workerNames + '. Use [DELEGATE:name:task] or [DONE].';
+          }
+        } else {
+          break;
+        }
+      } catch (error) {
+        stopThinking();
+        throw new Error(`Manager ${managerAgent.name} failed: ${error.message}`);
+      }
+    }
+  }
+
+  async function processMessageThroughWorkflow(message) {
+    const enabledAgents = state.agents.filter((a) => a.enabled);
+    if (!enabledAgents.length) {
+      setLog('No enabled agents are online.');
+      return;
+    }
+    switch (state.workflowMode) {
+      case 'sequential':
+        await runSequential(message, enabledAgents);
+        break;
+      case 'handoff':
+        await runHandoff(message, enabledAgents);
+        break;
+      case 'group_chat':
+        await runGroupChat(message, enabledAgents);
+        break;
+      case 'magentic':
+        await runMagentic(message, enabledAgents);
+        break;
+      default:
+        await runConcurrent(message, enabledAgents);
     }
   }
 
@@ -498,6 +823,40 @@
 
   ids.createNpcBtn.addEventListener('click', handleCreateNpc);
   ids.sendMessageBtn.addEventListener('click', handleSendMessage);
+
+  function renderOrchestrationInfo() {
+    const mode = state.workflowMode;
+    const info = ORCHESTRATION_INFO[mode] || ORCHESTRATION_INFO.concurrent;
+    if (ids.orchestrationInfo) {
+      ids.orchestrationInfo.innerHTML =
+        '<div class="info-label">' + info.name + '</div>' +
+        '<div>' + info.summary + '</div>' +
+        '<div class="info-pattern">' + info.pattern + '</div>' +
+        '<div class="info-use-case">Use cases: ' + info.useCase + '</div>' +
+        '<a href="' + info.docUrl + '" target="_blank" rel="noopener">Documentation \u2197</a>';
+    }
+    const configs = ['sequentialConfig', 'handoffConfig', 'groupChatConfig', 'magenticConfig'];
+    configs.forEach((id) => { if (ids[id]) ids[id].style.display = 'none'; });
+    const configMap = { sequential: 'sequentialConfig', handoff: 'handoffConfig', group_chat: 'groupChatConfig', magentic: 'magenticConfig' };
+    const active = configMap[mode];
+    if (active && ids[active]) ids[active].style.display = '';
+  }
+
+  function populateAgentSelectors() {
+    const enabledAgents = state.agents.filter((a) => a.enabled);
+    [ids.triageAgent, ids.managerAgent].forEach((select) => {
+      if (!select) return;
+      const current = select.value;
+      select.innerHTML = '<option value="">First enabled agent</option>';
+      enabledAgents.forEach((a) => {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.name;
+        select.appendChild(opt);
+      });
+      if (current) select.value = current;
+    });
+  }
 
   async function loadAgents() {
     try {
@@ -533,6 +892,7 @@
       });
       renderAgentsPanel();
       renderOffice();
+      populateAgentSelectors();
       setLog(`Loaded ${added} new agent(s) from Foundry (${remoteAgents.length} total).`);
     } catch (error) {
       setLog(error.message);
@@ -542,12 +902,28 @@
   ids.loadAgentsBtn.addEventListener('click', loadAgents);
   ids.workflowMode.addEventListener('change', () => {
     state.workflowMode = ids.workflowMode.value;
-    setLog(`Workflow set to ${state.workflowMode}.`);
+    renderOrchestrationInfo();
+    populateAgentSelectors();
+    setLog(`Orchestration set to ${ORCHESTRATION_INFO[state.workflowMode]?.name || state.workflowMode}.`);
   });
   ids.handoffMode.addEventListener('change', () => {
     state.handoffMode = ids.handoffMode.value;
-    setLog(`Sequential handoff set to ${state.handoffMode}.`);
   });
+  if (ids.triageAgent) {
+    ids.triageAgent.addEventListener('change', () => {
+      state.triageAgentId = ids.triageAgent.value;
+    });
+  }
+  if (ids.managerAgent) {
+    ids.managerAgent.addEventListener('change', () => {
+      state.managerAgentId = ids.managerAgent.value;
+    });
+  }
+  if (ids.maxRoundsInput) {
+    ids.maxRoundsInput.addEventListener('change', () => {
+      state.maxRounds = parseInt(ids.maxRoundsInput.value, 10) || 3;
+    });
+  }
 
   ids.clearTraceBtn.addEventListener('click', () => {
     state.trace = [];
@@ -576,6 +952,7 @@
     agent.enabled = target.checked;
     renderAgentsPanel();
     renderOffice();
+    populateAgentSelectors();
     setLog(`${agent.name} is now ${agent.enabled ? 'online' : 'sleeping'} at their desk.`);
   });
 
@@ -598,5 +975,7 @@
   renderAgentsPanel();
   renderOffice();
   renderTracePanel();
+  renderOrchestrationInfo();
+  populateAgentSelectors();
   loadAgents();
 })();

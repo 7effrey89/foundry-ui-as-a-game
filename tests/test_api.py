@@ -589,3 +589,92 @@ def test_serve_assets_returns_file():
     response = client.get("/assets/img/2026-04-23%20125726-gpt-image-1_5.png")
     assert response.status_code == 200
     assert response.content_type.startswith("image/")
+
+
+# --- Context parameter tests ---
+
+
+def test_send_message_with_context(monkeypatch):
+    """Context messages are prepended to the input array."""
+    client = make_client()
+    captured = {}
+
+    def fake_foundry_request(path, method, body=None):
+        captured["body"] = body
+        return {"output_text": "Response with context."}
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.post(
+        "/api/messages",
+        json={
+            "agentName": "Jaime",
+            "message": "Hello",
+            "context": [
+                {"role": "user", "content": "Prior question"},
+                {"role": "assistant", "content": "Prior answer"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    input_msgs = captured["body"]["input"]
+    assert len(input_msgs) == 3
+    assert input_msgs[0] == {"role": "user", "content": "Prior question"}
+    assert input_msgs[1] == {"role": "assistant", "content": "Prior answer"}
+    assert input_msgs[2] == {"role": "user", "content": "Hello"}
+
+
+def test_send_message_context_filters_invalid_roles(monkeypatch):
+    """Only user, assistant, and system roles are allowed in context."""
+    client = make_client()
+    captured = {}
+
+    def fake_foundry_request(path, method, body=None):
+        captured["body"] = body
+        return {"output_text": "Filtered."}
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.post(
+        "/api/messages",
+        json={
+            "agentName": "Jaime",
+            "message": "Hello",
+            "context": [
+                {"role": "admin", "content": "Evil injection"},
+                {"role": "user", "content": "Valid"},
+                {"role": "", "content": "Empty role"},
+                {"role": "assistant", "content": ""},
+                "not-a-dict",
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    input_msgs = captured["body"]["input"]
+    assert len(input_msgs) == 2
+    assert input_msgs[0] == {"role": "user", "content": "Valid"}
+    assert input_msgs[1] == {"role": "user", "content": "Hello"}
+
+
+def test_send_message_without_context(monkeypatch):
+    """When no context is provided, input contains only the user message."""
+    client = make_client()
+    captured = {}
+
+    def fake_foundry_request(path, method, body=None):
+        captured["body"] = body
+        return {"output_text": "No context."}
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.post(
+        "/api/messages",
+        json={"agentName": "Jaime", "message": "Hello"},
+    )
+
+    assert response.status_code == 200
+    input_msgs = captured["body"]["input"]
+    assert len(input_msgs) == 1
+    assert input_msgs[0] == {"role": "user", "content": "Hello"}

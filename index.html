@@ -31,19 +31,41 @@
           </fieldset>
 
           <fieldset>
-            <legend>Workflow</legend>
-            <label>Strategy
+            <legend>Orchestration Pattern</legend>
+            <label>Pattern
               <select id="workflowMode">
-                <option value="group">Group (all enabled agents respond)</option>
-                <option value="sequential">Sequential (enabled agents respond in order)</option>
+                <option value="concurrent">Concurrent</option>
+                <option value="sequential">Sequential</option>
+                <option value="handoff">Handoff</option>
+                <option value="group_chat">Group Chat</option>
+                <option value="magentic">Magentic</option>
               </select>
             </label>
-            <label>Sequential handoff
-              <select id="handoffMode">
-                <option value="previous_response">Pass previous response only</option>
-                <option value="append_history">Append prior context and response</option>
-              </select>
-            </label>
+            <div id="orchestrationInfo" class="orchestration-info"></div>
+            <div id="sequentialConfig" class="orchestration-config" style="display:none">
+              <label>Context passing
+                <select id="handoffMode">
+                  <option value="previous_response">Pass previous response only</option>
+                  <option value="append_history">Append full context chain</option>
+                </select>
+              </label>
+            </div>
+            <div id="handoffConfig" class="orchestration-config" style="display:none">
+              <label>Triage Agent
+                <select id="triageAgent"><option value="">First enabled agent</option></select>
+              </label>
+            </div>
+            <div id="groupChatConfig" class="orchestration-config" style="display:none">
+              <label>Max Rounds
+                <input id="maxRounds" type="number" min="1" max="10" value="3" />
+              </label>
+            </div>
+            <div id="magenticConfig" class="orchestration-config" style="display:none">
+              <label>Manager Agent
+                <select id="managerAgent"><option value="">First enabled agent</option></select>
+              </label>
+            </div>
+          </fieldset>
         </div>
 
         <div class="row message-row">

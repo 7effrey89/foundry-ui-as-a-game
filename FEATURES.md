@@ -12,19 +12,25 @@
 - Load existing Foundry agents from the server into the NPC list.
 - Agent cards display attached tools, knowledge sources, memory stores, and guardrails as colored badges.
 - Chat directly with a specific agent via the per-agent input field.
-- Group workflow: all enabled agents respond to a broadcast message.
-- Sequential workflow: enabled agents respond in order and pass context.
-- Sequential handoff mode is configurable from the UI:
-  - `previous_response`: pass only the prior agent response
-  - `append_history`: pass the original message plus prior response
 - Enable/disable agents to control which desks are online.
 - Agent speech bubbles can show observability snippets (tool approvals/reasoning summaries) during conversations.
+- Five orchestration patterns from the [Microsoft Agent Framework](https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/), selectable via the UI:
+  - **Concurrent**: All agents process the same message simultaneously and independently.
+  - **Sequential**: Agents execute in pipeline order, each building on the previous output.
+    - Context passing mode: `previous_response` (prior output only) or `append_history` (full chain).
+  - **Handoff**: A triage agent dynamically routes conversations to specialist agents based on context.
+    - Configurable triage agent selection.
+  - **Group Chat**: Agents collaborate round-robin in a shared conversation with configurable max rounds.
+  - **Magentic**: A manager agent coordinates specialized workers through dynamic delegation.
+    - Configurable manager agent selection.
+- Orchestration info panel shows description, flow pattern, use cases, and documentation link for the selected pattern.
 
 ## Server-Side Foundry Integration
 - Flask backend handles Foundry API requests.
 - `GET /api/agents` lists existing Foundry agents.
 - `POST /api/agents` creates a new Foundry agent.
 - `POST /api/messages` sends a message to a specific agent.
+- `POST /api/messages` accepts optional `context` array for multi-turn conversation history.
 - `POST /api/messages` returns both final `response` and chronological `trace` events for observability.
 - Uses Azure `DefaultAzureCredential` for Entra authentication without API keys.
 - Configurable token scope via `FOUNDRY_SCOPE` (defaults to `https://ai.azure.com`).

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
+import logging
+
 import requests
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
@@ -16,6 +18,9 @@ FOUNDRY_SCOPE = os.getenv("FOUNDRY_SCOPE", "https://ai.azure.com")
 FOUNDRY_PROJECT_ENDPOINT = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").rstrip("/")
 FOUNDRY_MODEL_DEPLOYMENT = os.getenv("FOUNDRY_MODEL_DEPLOYMENT", "")
 FOUNDRY_API_VERSION = os.getenv("FOUNDRY_API_VERSION", "v1")
+MAX_AUTH_RETRIES = 2
+
+logger = logging.getLogger(__name__)
 
 credential = DefaultAzureCredential()
 
@@ -92,36 +97,66 @@ def _build_trace_entries(result: Dict[str, Any]) -> list[Dict[str, Any]]:
     return trace
 
 
+def _get_token() -> str:
+    global credential
+    try:
+        return credential.get_token(FOUNDRY_SCOPE).token
+    except Exception:
+        logger.warning("Credential failed, creating fresh DefaultAzureCredential")
+        credential = DefaultAzureCredential()
+        return credential.get_token(FOUNDRY_SCOPE).token
+
+
 def foundry_request(path: str, method: str, body: Optional[Dict[str, Any]] = None) -> Any:
     if not FOUNDRY_PROJECT_ENDPOINT:
         raise ValueError("FOUNDRY_PROJECT_ENDPOINT is required.")
 
-    token = credential.get_token(FOUNDRY_SCOPE).token
     url = f"{FOUNDRY_PROJECT_ENDPOINT}{path}"
     if "/v1/" not in path:
         separator = "&" if "?" in url else "?"
         url = f"{url}{separator}api-version={FOUNDRY_API_VERSION}"
 
-    response = requests.request(
-        method,
-        url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-        json=body,
-        timeout=60,
-    )
+    last_error: Optional[Exception] = None
+    for attempt in range(MAX_AUTH_RETRIES):
+        try:
+            token = _get_token()
+        except Exception as exc:
+            last_error = exc
+            logger.warning("Auth attempt %d failed: %s", attempt + 1, exc)
+            continue
 
-    if not response.ok:
-        raise RuntimeError(
-            f"Foundry API error {response.status_code}: {response.text}"
+        response = requests.request(
+            method,
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=60,
         )
 
-    content_type = response.headers.get("content-type", "")
-    if "application/json" in content_type:
-        return response.json()
-    return None
+        if response.status_code == 401:
+            logger.warning("Got 401 on attempt %d, refreshing credential", attempt + 1)
+            credential = DefaultAzureCredential()
+            last_error = RuntimeError(
+                f"Foundry API error {response.status_code}: {response.text}"
+            )
+            continue
+
+        if not response.ok:
+            raise RuntimeError(
+                f"Foundry API error {response.status_code}: {response.text}"
+            )
+
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            return response.json()
+        return None
+
+    raise RuntimeError(
+        f"Authentication failed after {MAX_AUTH_RETRIES} attempts: {last_error}"
+    )
 
 
 @app.route("/")
@@ -226,9 +261,20 @@ def send_message() -> Any:
     data = request.get_json(force=True) or {}
     agent_name = (data.get("agentName") or "").strip()
     message = (data.get("message") or "").strip()
+    context = data.get("context") or []
 
     if not agent_name or not message:
         return jsonify({"error": "agentName and message are required."}), 400
+
+    input_messages = []
+    for ctx in context:
+        if not isinstance(ctx, dict):
+            continue
+        role = (ctx.get("role") or "").strip()
+        content = (ctx.get("content") or "").strip()
+        if role in ("user", "assistant", "system") and content:
+            input_messages.append({"role": role, "content": content})
+    input_messages.append({"role": "user", "content": message})
 
     result = foundry_request(
         "/openai/v1/responses",
@@ -238,7 +284,7 @@ def send_message() -> Any:
                 "type": "agent_reference",
                 "name": agent_name,
             },
-            "input": [{"role": "user", "content": message}],
+            "input": input_messages,
         },
     )
 
