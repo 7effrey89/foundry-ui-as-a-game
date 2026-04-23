@@ -219,6 +219,7 @@ def list_agents() -> Any:
         out.append({
             "id": a.get("id"),
             "name": a.get("name"),
+            "instructions": defn.get("instructions") or "",
             "tools": tools,
             "knowledge": knowledge,
             "memory": memory,

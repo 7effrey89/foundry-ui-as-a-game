@@ -105,14 +105,20 @@ button:hover {
   margin: 0 0.3rem 0 0;
 }
 
-.message-row input {
+.message-row {
+  align-items: stretch;
+}
+
+.message-row textarea {
   flex: 1;
   min-width: 0;
+  resize: vertical;
 }
 
 .message-row button {
-  width: auto;
-  white-space: nowrap;
+  width: 5rem;
+  white-space: normal;
+  word-wrap: break-word;
 }
 
 .agents-sidebar {
@@ -176,11 +182,54 @@ button:hover {
   padding: 0.45rem 0.55rem;
 }
 
+.trace-head-buttons {
+  display: flex;
+  gap: 0.3rem;
+}
+
 .trace-head button {
   width: auto;
   padding: 0.2rem 0.45rem;
   font-size: 0.7rem;
   letter-spacing: 0;
+}
+
+/* ── Trace resize handle ─────────────────────── */
+.trace-resize-handle {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 101;
+}
+
+.trace-resize-handle:hover,
+.trace-resize-handle:active {
+  background: var(--accent);
+  opacity: 0.3;
+}
+
+/* ── Trace show tab (when hidden) ────────────── */
+.trace-show-tab {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 100;
+  width: auto;
+  padding: 0.5rem 0.4rem;
+  font-size: 0.75rem;
+  border-radius: 4px 0 0 4px;
+  border: 2px solid var(--line);
+  border-right: none;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: -2px 0 6px rgba(0, 0, 0, 0.1);
+  writing-mode: vertical-rl;
+  letter-spacing: 1px;
 }
 
 .trace-list {
@@ -275,6 +324,43 @@ button:hover {
 
 .agent-name {
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.info-bubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  font-style: italic;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.info-bubble-tooltip {
+  position: fixed;
+  background: #1f2937;
+  color: #fff;
+  font-style: normal;
+  font-weight: 400;
+  font-size: 11px;
+  font-family: "Courier New", monospace;
+  padding: 6px 10px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  width: 220px;
+  z-index: 400;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 
 .agent-badges {
@@ -328,6 +414,52 @@ button:hover {
   width: auto;
   padding: 0.35rem 0.7rem;
   font-size: 0.8rem;
+}
+
+.sidebar-head-buttons {
+  display: flex;
+  gap: 0.3rem;
+}
+
+/* ── Modal lightbox ──────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-box {
+  background: var(--panel);
+  border: 2px solid var(--line);
+  padding: 1rem;
+  width: 380px;
+  max-width: 90vw;
+  box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.15);
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.modal-head button {
+  width: auto;
+  padding: 0.1rem 0.5rem;
+  font-size: 1.1rem;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  cursor: pointer;
+}
+
+.modal-head button:hover {
+  color: var(--text);
 }
 
 /* ── Office View ─────────────────────────────────── */

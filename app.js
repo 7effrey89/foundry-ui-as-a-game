@@ -139,11 +139,23 @@
     magenticConfig: document.getElementById('magenticConfig'),
     triageAgent: document.getElementById('triageAgent'),
     managerAgent: document.getElementById('managerAgent'),
-    maxRoundsInput: document.getElementById('maxRounds')
+    maxRoundsInput: document.getElementById('maxRounds'),
+    createAgentModalBtn: document.getElementById('createAgentModalBtn'),
+    createAgentModal: document.getElementById('createAgentModal'),
+    closeAgentModalBtn: document.getElementById('closeAgentModalBtn'),
+    modalLog: document.getElementById('modalLog'),
+    traceSidebar: document.getElementById('traceSidebar'),
+    traceResizeHandle: document.getElementById('traceResizeHandle'),
+    hideTraceBtn: document.getElementById('hideTraceBtn'),
+    showTraceBtn: document.getElementById('showTraceBtn')
   };
 
   function setLog(message) {
     ids.eventLog.textContent = message;
+  }
+
+  function setModalLog(message) {
+    ids.modalLog.textContent = message;
   }
 
   function createLocalId() {
@@ -345,6 +357,7 @@
       card.style.borderLeftColor = agentColor;
 
       const escapedName = agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const escapedDesc = (agent.description || 'No system prompt').replace(/&/g, '&amp;').replace(/</g, '&lt;');
       const escapedSpeech = (agent.lastSpeech || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
       function badges(label, items, cls) {
@@ -360,7 +373,7 @@
       ].filter(Boolean).join(' ');
 
       card.innerHTML = `
-        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span>${escapedName}</div>
+        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span>${escapedName}<span class="info-bubble" data-tooltip="${escapedDesc}">i</span></div>
         <div class="status"><label><input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" /> ${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</label></div>
         ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
         <div class="agent-chat">
@@ -510,30 +523,33 @@
     const name = ids.npcName.value.trim();
     const description = ids.npcDescription.value.trim();
     if (!name || !description) {
-      setLog('NPC name and description are required.');
+      setModalLog('NPC name and description are required.');
       return;
     }
 
     try {
-      setLog(`Creating Foundry agent "${name}"...`);
+      setModalLog(`Creating Foundry agent "${name}"...`);
       const foundryAgent = await createFoundryAgent(name, description);
+      const enabledCount = state.agents.filter((a) => a.enabled).length;
       state.agents.push({
         id: createLocalId(),
         name,
         description,
         foundryAgentId: foundryAgent.id,
         foundryAgentName: foundryAgent.name,
-        enabled: true,
+        enabled: enabledCount < MAX_ENABLED_AGENTS,
         lastSpeech: 'Ready to help!',
         bubbleSpeech: ''
       });
       ids.npcName.value = '';
       ids.npcDescription.value = '';
+      setModalLog('');
+      ids.createAgentModal.style.display = 'none';
       renderAgentsPanel();
       renderOffice();
       setLog(`Created NPC "${name}" (Foundry ID: ${foundryAgent.id}).`);
     } catch (error) {
-      setLog(error.message);
+      setModalLog(error.message);
     }
   }
 
@@ -822,6 +838,17 @@
   ids.createNpcBtn.addEventListener('click', handleCreateNpc);
   ids.sendMessageBtn.addEventListener('click', handleSendMessage);
 
+  // Modal open/close
+  ids.createAgentModalBtn.addEventListener('click', () => {
+    ids.createAgentModal.style.display = 'flex';
+  });
+  ids.closeAgentModalBtn.addEventListener('click', () => {
+    ids.createAgentModal.style.display = 'none';
+  });
+  ids.createAgentModal.addEventListener('click', (e) => {
+    if (e.target === ids.createAgentModal) ids.createAgentModal.style.display = 'none';
+  });
+
   function renderOrchestrationInfo() {
     const mode = state.workflowMode;
     const info = ORCHESTRATION_INFO[mode] || ORCHESTRATION_INFO.concurrent;
@@ -874,7 +901,7 @@
           state.agents.push({
             id: createLocalId(),
             name: ra.name,
-            description: '',
+            description: ra.instructions || '',
             foundryAgentId: ra.id,
             foundryAgentName: ra.name,
             tools: ra.tools || [],
@@ -891,7 +918,8 @@
       renderAgentsPanel();
       renderOffice();
       populateAgentSelectors();
-      setLog(`Loaded ${added} new agent(s) from Foundry (${remoteAgents.length} total).`);
+      const selectedCount = state.agents.filter((a) => a.enabled).length;
+      setLog(`${selectedCount} selected from Foundry (${remoteAgents.length} total).`);
     } catch (error) {
       setLog(error.message);
     }
@@ -968,6 +996,64 @@
       return;
     }
     handleSendToAgent(target.dataset.agentInput);
+  });
+
+  // ── Info bubble tooltip (fixed position) ──────
+  const tooltip = document.getElementById('infoBubbleTooltip');
+  ids.agentList.addEventListener('mouseenter', (e) => {
+    if (!e.target.classList.contains('info-bubble')) return;
+    const text = e.target.dataset.tooltip || '';
+    if (!text) return;
+    const rect = e.target.getBoundingClientRect();
+    tooltip.textContent = text;
+    tooltip.style.display = '';
+    tooltip.style.left = rect.left + 'px';
+    tooltip.style.top = (rect.bottom + 6) + 'px';
+    // clamp to viewport
+    requestAnimationFrame(() => {
+      const tr = tooltip.getBoundingClientRect();
+      if (tr.right > window.innerWidth - 8) {
+        tooltip.style.left = Math.max(8, window.innerWidth - tr.width - 8) + 'px';
+      }
+      if (tr.bottom > window.innerHeight - 8) {
+        tooltip.style.top = (rect.top - tr.height - 6) + 'px';
+      }
+    });
+  }, true);
+  ids.agentList.addEventListener('mouseleave', (e) => {
+    if (!e.target.classList.contains('info-bubble')) return;
+    tooltip.style.display = 'none';
+  }, true);
+
+  // ── Trace sidebar toggle ──────────────────────
+  ids.hideTraceBtn.addEventListener('click', () => {
+    ids.traceSidebar.style.display = 'none';
+    ids.showTraceBtn.style.display = '';
+    document.querySelector('.app').style.marginRight = '0';
+  });
+  ids.showTraceBtn.addEventListener('click', () => {
+    ids.traceSidebar.style.display = '';
+    ids.showTraceBtn.style.display = 'none';
+    document.querySelector('.app').style.marginRight = ids.traceSidebar.style.width || '';
+  });
+
+  // ── Trace sidebar resize ─────────────────────
+  ids.traceResizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = ids.traceSidebar.getBoundingClientRect().width;
+
+    function onMouseMove(e) {
+      const newWidth = Math.max(180, Math.min(600, startWidth + (startX - e.clientX)));
+      ids.traceSidebar.style.width = newWidth + 'px';
+      document.querySelector('.app').style.marginRight = newWidth + 'px';
+    }
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   });
 
   renderAgentsPanel();
