@@ -31,6 +31,7 @@
   ];
 
   const DOT_SEQUENCE = ['.', '..', '...'];
+  const MAX_TRACE_ENTRIES = 300;
 
   function startThinking(agentId) {
     let tick = 0;
@@ -211,8 +212,8 @@
       time: formatTime(),
       ...entry
     });
-    if (state.trace.length > 300) {
-      state.trace = state.trace.slice(state.trace.length - 300);
+    if (state.trace.length > MAX_TRACE_ENTRIES) {
+      state.trace = state.trace.slice(state.trace.length - MAX_TRACE_ENTRIES);
     }
     renderTracePanel();
   }
@@ -249,9 +250,9 @@
     }
   }
 
-  function buildSequentialHandoffMessage(initialMessage, previousAgentResponse) {
+  function buildSequentialHandoffMessage(originalUserMessage, previousAgentResponse) {
     if (state.handoffMode === 'append_history') {
-      return `${initialMessage}\n\nPrevious agent response: ${previousAgentResponse}`;
+      return `${originalUserMessage}\n\nPrevious agent response: ${previousAgentResponse}`;
     }
     return `Previous agent response: ${previousAgentResponse}`;
   }
@@ -502,20 +503,20 @@
           (a) => a.foundryAgentId === ra.id || a.foundryAgentName === ra.name
         );
         if (!alreadyExists) {
-      state.agents.push({
+          state.agents.push({
             id: createLocalId(),
             name: ra.name,
             description: '',
             foundryAgentId: ra.id,
             foundryAgentName: ra.name,
-        tools: ra.tools || [],
-        knowledge: ra.knowledge || [],
-        memory: ra.memory || [],
-        guardrail: ra.guardrail || '',
-        enabled: true,
-        lastSpeech: 'Ready to help!',
-        bubbleSpeech: ''
-      });
+            tools: ra.tools || [],
+            knowledge: ra.knowledge || [],
+            memory: ra.memory || [],
+            guardrail: ra.guardrail || '',
+            enabled: true,
+            lastSpeech: 'Ready to help!',
+            bubbleSpeech: ''
+          });
           added += 1;
         }
       });

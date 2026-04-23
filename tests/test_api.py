@@ -53,6 +53,75 @@ def test_foundry_request_uses_scope(monkeypatch):
     assert captured_scope["scope"] == "https://ai.azure.com"
 
 
+# --- Helper extraction tests ---
+
+
+def test_extract_response_text_uses_output_text():
+    result = {"output_text": "Primary text", "output": []}
+    assert target._extract_response_text(result) == "Primary text"
+
+
+def test_extract_response_text_falls_back_to_message_output():
+    result = {
+        "output_text": "",
+        "output": [
+            {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": "Fallback text"},
+                ],
+            }
+        ],
+    }
+    assert target._extract_response_text(result) == "Fallback text"
+
+
+def test_extract_response_text_returns_empty_when_no_text():
+    assert target._extract_response_text({"output_text": "", "output": []}) == ""
+
+
+def test_build_trace_entries_extracts_supported_types():
+    result = {
+        "output": [
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": "hello"}],
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "thinking"}],
+            },
+            {
+                "type": "mcp_approval_request",
+                "id": "approval-1",
+                "server_label": "kb_demo",
+                "name": "retrieve",
+            },
+            {
+                "type": "mcp_call",
+                "id": "call-1",
+            },
+        ]
+    }
+
+    trace = target._build_trace_entries(result)
+    assert any(item["type"] == "message_output" for item in trace)
+    assert any(item["type"] == "reasoning" for item in trace)
+    assert any(item["type"] == "tool_approval_request" for item in trace)
+    assert any(item["type"] == "mcp_call" for item in trace)
+
+
+def test_build_trace_entries_handles_empty_or_malformed_items():
+    empty_trace = target._build_trace_entries({"output": []})
+    malformed_trace = target._build_trace_entries({"output": [{}]})
+    message_without_text = target._build_trace_entries(
+        {"output": [{"type": "message", "content": [{}]}]}
+    )
+    assert empty_trace == []
+    assert malformed_trace == []
+    assert message_without_text == []
+
+
 # --- API version tests ---
 
 
@@ -395,6 +464,33 @@ def test_send_message_extracts_from_output_array(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["response"] == "Fallback response."
+
+
+def test_send_message_trace_contains_message_output_and_final_response(monkeypatch):
+    client = make_client()
+
+    def fake_foundry_request(path, method, body=None):
+        return {
+            "output_text": "",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "Trace hello"}],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(target, "foundry_request", fake_foundry_request)
+
+    response = client.post(
+        "/api/messages",
+        json={"agentName": "Jaime", "message": "Hello"},
+    )
+
+    assert response.status_code == 200
+    trace = response.get_json()["trace"]
+    assert any(item["type"] == "message_output" for item in trace)
+    assert any(item["type"] == "final_response" for item in trace)
 
 
 def test_send_message_no_response(monkeypatch):
