@@ -1,7 +1,8 @@
 # Features
 
 ## Experience
-- Isometric pixel-art office displayed as a pre-rendered background image.
+- Clean, modern, minimalistic UI with system sans-serif fonts, soft rounded corners, and subtle shadows.
+- Isometric pixel-art office displayed as a pre-rendered background image (pixelated rendering preserved for game assets only).
 - Name labels and speech bubbles overlay the background at desk positions.
 - Status dots (blue = user, green = awake, amber = napping, grey = empty) indicate desk state.
 - Player avatar and NPC agents appear at designated desk hotspots.
