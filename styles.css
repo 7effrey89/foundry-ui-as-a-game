@@ -35,9 +35,26 @@ body {
   background: var(--panel);
   border: 2px solid var(--line);
   border-radius: 0;
-  padding: 1rem;
+  padding: 0;
   margin-bottom: 1rem;
   box-shadow: 4px 4px 0 rgba(0,0,0,0.1);
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 0.45rem 0.55rem;
+}
+
+.panel > *:not(.panel-head) {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.panel > *:last-child {
+  padding-bottom: 1rem;
 }
 
 .grid.two-col {
@@ -690,6 +707,7 @@ button:hover {
   overflow: hidden;
   border: 2px solid #1a1840;
   margin: 0 auto;
+  padding: 0 !important;
 }
 
 .iso-scene {
