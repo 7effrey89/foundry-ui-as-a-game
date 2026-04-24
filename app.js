@@ -13,6 +13,7 @@
     managerAgentId: '',
     trace: [],
     agents: [],
+    autoHideBubbles: true,
     tts: {
       available: false,
       enabled: false,
@@ -40,6 +41,26 @@
       pctY: (iy * 100 - 3).toFixed(2),
       bubbleLeft: bx
     }));
+  }
+
+  const _bubbleTimers = {};
+
+  function showBubble(agentId) {
+    const agent = state.agents.find((a) => a.id === agentId);
+    if (!agent) return;
+    agent.bubbleVisible = true;
+    if (_bubbleTimers[agentId]) { clearTimeout(_bubbleTimers[agentId]); delete _bubbleTimers[agentId]; }
+  }
+
+  function scheduleBubbleHide(agentId) {
+    if (!state.autoHideBubbles) return;
+    if (_bubbleTimers[agentId]) clearTimeout(_bubbleTimers[agentId]);
+    _bubbleTimers[agentId] = setTimeout(() => {
+      const agent = state.agents.find((a) => a.id === agentId);
+      if (agent) agent.bubbleVisible = false;
+      delete _bubbleTimers[agentId];
+      renderOffice();
+    }, 10000);
   }
 
   const THINKING_PHRASES = [
@@ -104,6 +125,8 @@
   };
 
   function startThinking(agentId) {
+    showBubble(agentId);
+    renderOffice();
     let tick = 0;
     const update = () => {
       const dotIndex = tick % (DOT_SEQUENCE.length + 1);
@@ -167,6 +190,7 @@
     openSettingsBtn: document.getElementById('openSettingsBtn'),
     settingsModal: document.getElementById('settingsModal'),
     closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+    autoHideBubbles: document.getElementById('autoHideBubbles'),
     ttsEnabled: document.getElementById('ttsEnabled'),
     ttsSettings: document.getElementById('ttsSettings'),
     ttsUnavailable: document.getElementById('ttsUnavailable'),
@@ -381,6 +405,7 @@
       const response = result?.response || 'No response received from agent.';
       agent.lastSpeech = response;
       addTraceEntries(agent, result, 'direct');
+      scheduleBubbleHide(agent.id);
       renderOffice();
       renderAgentsPanel();
       setLog(`${agent.name} responded.`);
@@ -533,6 +558,7 @@
     const bubbleSummary = latestForBubble?.text || latestForBubble?.summary || '';
     if (bubbleSummary) {
       agent.bubbleSpeech = shortText(bubbleSummary, 70);
+      showBubble(agent.id);
     }
   }
 
@@ -712,7 +738,8 @@
       const deskIdx = (slot + 1) % desks.length;
       usedDesks.add(deskIdx);
       const desk = desks[deskIdx];
-      const bubble = agent.bubbleSpeech || agent.lastSpeech || '';
+      const bubbleRaw = agent.bubbleSpeech || agent.lastSpeech || '';
+      const bubble = state.autoHideBubbles ? (agent.bubbleVisible ? bubbleRaw : '') : bubbleRaw;
       const color = getAgentColor(agent.id);
       const deskEl = createDeskElement(desk, agent.name, 'awake', bubble, agent.id, color);
       scene.appendChild(deskEl);
@@ -780,6 +807,7 @@
         const response = result?.response || 'No response received from agent.';
         agent.lastSpeech = response;
         addTraceEntries(agent, result, 'concurrent');
+        scheduleBubbleHide(agent.id);
         renderOffice();
         renderAgentsPanel();
         speakText(response, agent.id);
@@ -822,6 +850,7 @@
         const response = result?.response || 'No response received from agent.';
         agent.lastSpeech = response;
         addTraceEntries(agent, result, 'sequential');
+        scheduleBubbleHide(agent.id);
         rollingMessage = buildSequentialHandoffMessage(message, response);
         renderOffice();
         renderAgentsPanel();
@@ -859,6 +888,7 @@
         const response = result?.response || 'No response received from agent.';
         currentAgent.lastSpeech = response;
         addTraceEntries(currentAgent, result, 'handoff');
+        scheduleBubbleHide(currentAgent.id);
         renderOffice();
         renderAgentsPanel();
         speakText(response, currentAgent.id);
@@ -912,6 +942,7 @@
           const response = result?.response || 'No response received from agent.';
           agent.lastSpeech = response;
           addTraceEntries(agent, result, 'group_chat');
+          scheduleBubbleHide(agent.id);
           conversation.push({ role: 'assistant', content: '[' + agent.name + ']: ' + response });
           roundMessage = 'Continue the group discussion. Original task: ' + message;
           renderOffice();
@@ -939,6 +970,7 @@
         stopThinking();
         managerAgent.lastSpeech = result?.response || 'No response received from agent.';
         addTraceEntries(managerAgent, result, 'magentic');
+        scheduleBubbleHide(managerAgent.id);
         renderOffice();
         renderAgentsPanel();
         speakText(managerAgent.lastSpeech, managerAgent.id);
@@ -964,11 +996,13 @@
         const response = result?.response || 'No response received from agent.';
         managerAgent.lastSpeech = response;
         addTraceEntries(managerAgent, result, 'magentic');
+        scheduleBubbleHide(managerAgent.id);
         renderOffice();
         renderAgentsPanel();
         if (response.includes('[DONE]')) {
           addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_done', summary: 'Manager declared workflow complete' });
           managerAgent.lastSpeech = response.replace(/\[DONE\]/gi, '').trim();
+          scheduleBubbleHide(managerAgent.id);
           renderOffice();
           renderAgentsPanel();
           break;
@@ -990,6 +1024,7 @@
               const workerResponse = workerResult?.response || 'No response received from agent.';
               worker.lastSpeech = workerResponse;
               addTraceEntries(worker, workerResult, 'magentic');
+              scheduleBubbleHide(worker.id);
               renderOffice();
               renderAgentsPanel();
               speakText(workerResponse, worker.id);
@@ -1107,6 +1142,16 @@
   });
   ids.ttsEnabled.addEventListener('change', () => {
     state.tts.enabled = ids.ttsEnabled.checked;
+  });
+  ids.autoHideBubbles.addEventListener('change', () => {
+    state.autoHideBubbles = ids.autoHideBubbles.checked;
+    if (!state.autoHideBubbles) {
+      state.agents.forEach((a) => { a.bubbleVisible = true; });
+      Object.keys(_bubbleTimers).forEach((id) => { clearTimeout(_bubbleTimers[id]); delete _bubbleTimers[id]; });
+    } else {
+      state.agents.forEach((a) => { a.bubbleVisible = false; });
+    }
+    renderOffice();
   });
   ids.ttsVoiceAssignments.addEventListener('change', (e) => {
     const select = e.target.closest('[data-voice-agent]');
@@ -1366,6 +1411,9 @@
   }
 
   function renderSettingsModal() {
+    if (ids.autoHideBubbles) {
+      ids.autoHideBubbles.checked = state.autoHideBubbles;
+    }
     if (!ids.ttsSettings || !ids.ttsUnavailable) return;
     if (state.tts.available) {
       ids.ttsUnavailable.style.display = 'none';

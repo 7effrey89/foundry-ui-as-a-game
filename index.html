@@ -139,6 +139,14 @@
         </div>
         <div class="settings-body">
           <fieldset class="settings-section">
+            <legend>Text Bubbles</legend>
+            <label class="tts-toggle-label">
+              <input type="checkbox" id="autoHideBubbles" checked />
+              Auto-hide text bubbles after 10 seconds
+            </label>
+            <p class="settings-hint">When enabled, bubbles appear only when agents respond and disappear after 10 seconds. No bubbles are shown at startup. When disabled, all bubbles remain visible.</p>
+          </fieldset>
+          <fieldset class="settings-section">
             <legend>Text-to-Speech (MAI-Voice-1)</legend>
             <div id="ttsUnavailable" class="tts-unavailable" style="display:none">
               <p>TTS is not available. Configure <code>AZURE_SPEECH_KEY</code> and <code>AZURE_SPEECH_REGION</code> in your <code>.env</code> file to enable voice output.</p>

@@ -956,6 +956,12 @@ button:hover {
   padding: 0;
 }
 
+.settings-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+
 .tts-voice-assignments {
   display: flex;
   flex-direction: column;

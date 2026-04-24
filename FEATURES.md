@@ -46,6 +46,11 @@
 - Required: `FOUNDRY_PROJECT_ENDPOINT`, `FOUNDRY_MODEL_DEPLOYMENT`.
 - Optional: `FOUNDRY_API_VERSION` (defaults to `v1`), `FOUNDRY_SCOPE`.
 
+## Text Bubbles
+- Auto-hide text bubbles setting (enabled by default): bubbles appear when agents respond and disappear after 10 seconds.
+- No text bubbles are shown at app startup when auto-hide is enabled.
+- Toggle in Settings to switch between auto-hide and always-visible bubble modes.
+
 ## Text-to-Speech (MAI-Voice-1)
 - Optional TTS feature: agents speak their responses aloud using Azure Speech Service (MAI-Voice-1).
 - Each agent is assigned a distinct voice actor from the MAI-Voice-1 prebuilt voice roster (Jasper, June, Grant, Iris, Reed, Joy).

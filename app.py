@@ -176,7 +176,7 @@ def foundry_request(path: str, method: str, body: Optional[Dict[str, Any]] = Non
                 "Content-Type": "application/json",
             },
             json=body,
-            timeout=60,
+            timeout=120,
         )
 
         if response.status_code == 401:
