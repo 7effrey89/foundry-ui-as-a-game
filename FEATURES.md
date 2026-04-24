@@ -6,6 +6,7 @@
 - Status dots (blue = user, green = awake, amber = napping, grey = empty) indicate desk state.
 - Player avatar and NPC agents appear at designated desk hotspots.
 - NPC agents switch between awake and sleeping visual states.
+- Animated green handoff arrows between agent desks visualize whose turn it is during sequential, handoff, group chat, and magentic workflows. Toggleable in Settings.
 
 ## Agents and Workflow
 - Create NPCs that map to Azure AI Foundry agents.
@@ -50,6 +51,9 @@
 - Auto-hide text bubbles setting (enabled by default): bubbles appear when agents respond and disappear after 10 seconds.
 - No text bubbles are shown at app startup when auto-hide is enabled.
 - Toggle in Settings to switch between auto-hide and always-visible bubble modes.
+
+## Session Trace
+- Final response entries are visually prominent with green highlight, bolder text, and subtle shadow for quick scanning.
 
 ## Text-to-Speech (MAI-Voice-1)
 - Optional TTS feature: agents speak their responses aloud using Azure Speech Service (MAI-Voice-1).

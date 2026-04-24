@@ -14,6 +14,8 @@
     trace: [],
     agents: [],
     autoHideBubbles: true,
+    showHandoffArrows: true,
+    activeArrow: null,  // { fromId, toId } for handoff arrow visualization
     tts: {
       available: false,
       enabled: false,
@@ -44,6 +46,29 @@
   }
 
   const _bubbleTimers = {};
+
+  function showArrow(fromId, toId) {
+    if (!state.showHandoffArrows) return;
+    state.activeArrow = { fromId, toId };
+    renderOffice();
+  }
+
+  function clearArrow() {
+    if (state.activeArrow) {
+      state.activeArrow = null;
+      renderOffice();
+    }
+  }
+
+  function getAgentDeskCenter(agentId) {
+    const enabledAgents = state.agents.filter((a) => a.enabled).slice(0, MAX_ENABLED_AGENTS);
+    const slot = enabledAgents.findIndex((a) => a.id === agentId);
+    if (slot < 0) return null;
+    const desks = getDesks();
+    const deskIdx = (slot + 1) % desks.length;
+    const desk = desks[deskIdx];
+    return { x: parseFloat(desk.pctX) + 5, y: parseFloat(desk.pctY) + 4 };
+  }
 
   function showBubble(agentId) {
     const agent = state.agents.find((a) => a.id === agentId);
@@ -191,6 +216,7 @@
     settingsModal: document.getElementById('settingsModal'),
     closeSettingsBtn: document.getElementById('closeSettingsBtn'),
     autoHideBubbles: document.getElementById('autoHideBubbles'),
+    showHandoffArrows: document.getElementById('showHandoffArrows'),
     ttsEnabled: document.getElementById('ttsEnabled'),
     ttsSettings: document.getElementById('ttsSettings'),
     ttsUnavailable: document.getElementById('ttsUnavailable'),
@@ -445,6 +471,11 @@
     state.trace.forEach((entry, idx) => {
       const item = document.createElement('article');
       item.className = 'trace-item';
+      if (entry.type === 'final_response' || entry.type === 'user_message') {
+        item.classList.add(entry.type === 'final_response' ? 'trace-item-final' : 'trace-item-user');
+      } else {
+        item.classList.add('trace-item-intermediate');
+      }
       item.dataset.traceIdx = idx;
       const color = entry.agentId === 'user' ? '#6b7280' : getAgentColor(entry.agentId);
       item.style.borderLeftColor = color;
@@ -754,6 +785,64 @@
       scene.appendChild(emptyDesk);
     }
 
+    // ── Animated handoff arrow ─────────────────
+    if (state.activeArrow) {
+      const from = getAgentDeskCenter(state.activeArrow.fromId);
+      const to = getAgentDeskCenter(state.activeArrow.toId);
+      if (from && to) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.classList.add('arrow-overlay');
+        svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('preserveAspectRatio', 'none');
+
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'arrowhead');
+        marker.setAttribute('markerWidth', '6');
+        marker.setAttribute('markerHeight', '4');
+        marker.setAttribute('refX', '5');
+        marker.setAttribute('refY', '2');
+        marker.setAttribute('orient', 'auto');
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', '0 0, 6 2, 0 4');
+        polygon.setAttribute('fill', '#22c55e');
+        marker.appendChild(polygon);
+        defs.appendChild(marker);
+        svg.appendChild(defs);
+
+        // Shorten line so it doesn't overlap the desks
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const pad = len > 10 ? 3 : 0;
+        const ux = dx / len;
+        const uy = dy / len;
+        const x1 = from.x + ux * pad;
+        const y1 = from.y + uy * pad;
+        const x2 = to.x - ux * pad;
+        const y2 = to.y - uy * pad;
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.setAttribute('stroke', '#22c55e');
+        line.setAttribute('stroke-width', '0.5');
+        line.setAttribute('stroke-dasharray', '2 1');
+        line.setAttribute('marker-end', 'url(#arrowhead)');
+        line.classList.add('arrow-line');
+
+        // Set dash length for animation
+        const lineLen = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        line.style.strokeDasharray = `2 1`;
+        line.style.setProperty('--arrow-len', lineLen);
+
+        svg.appendChild(line);
+        scene.appendChild(svg);
+      }
+    }
+
     ids.office.appendChild(scene);
   }
 
@@ -836,7 +925,9 @@
       orderedAgents = ordered;
     }
     let rollingMessage = message;
+    let prevAgentId = null;
     for (const agent of orderedAgents) {
+      if (prevAgentId) showArrow(prevAgentId, agent.id);
       const stopThinking = startThinking(agent.id);
       addTrace({
         agentName: agent.name,
@@ -852,6 +943,7 @@
         addTraceEntries(agent, result, 'sequential');
         scheduleBubbleHide(agent.id);
         rollingMessage = buildSequentialHandoffMessage(message, response);
+        prevAgentId = agent.id;
         renderOffice();
         renderAgentsPanel();
         speakText(response, agent.id);
@@ -874,7 +966,9 @@
         '. If this question needs a specialist, end your response with [HANDOFF:agent_name]. Otherwise respond normally.]';
     }
     const context = [];
+    let previousHandoffAgent = null;
     for (let hop = 0; hop < MAX_HANDOFFS; hop++) {
+      if (previousHandoffAgent) showArrow(previousHandoffAgent.id, currentAgent.id);
       const stopThinking = startThinking(currentAgent.id);
       addTrace({
         agentName: currentAgent.name,
@@ -911,6 +1005,7 @@
             currentMessage = message + '\n\n[You received a handoff. Prior agent said: ' +
               response.replace(/\[HANDOFF:[^\]]+\]/gi, '').trim() +
               (remaining ? '\nAvailable agents for further handoff: ' + remaining + '. End with [HANDOFF:agent_name] to transfer, or respond normally.]' : ']');
+            previousHandoffAgent = currentAgent;
             currentAgent = targetAgent;
             continue;
           }
@@ -927,8 +1022,10 @@
     const maxRounds = state.maxRounds || 3;
     const conversation = [];
     let roundMessage = message;
+    let prevGroupAgent = null;
     for (let round = 0; round < maxRounds; round++) {
       for (const agent of enabledAgents) {
+        if (prevGroupAgent) showArrow(prevGroupAgent.id, agent.id);
         const stopThinking = startThinking(agent.id);
         addTrace({
           agentName: agent.name,
@@ -948,6 +1045,7 @@
           renderOffice();
           renderAgentsPanel();
           speakText(response, agent.id);
+          prevGroupAgent = agent;
         } catch (error) {
           stopThinking();
           throw new Error(`Agent ${agent.name} failed: ${error.message}`);
@@ -1016,6 +1114,7 @@
             (a.foundryAgentName || '').toLowerCase() === workerName.toLowerCase()
           );
           if (worker) {
+            showArrow(managerAgent.id, worker.id);
             addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_delegate', summary: `Manager \u2192 ${worker.name}: "${shortText(task)}"` });
             const workerStop = startThinking(worker.id);
             try {
@@ -1032,6 +1131,7 @@
               context.push({ role: 'user', content: 'Worker ' + worker.name + ' completed the task: ' + workerResponse });
               managerMessage = 'Worker ' + worker.name + ' responded: "' + workerResponse +
                 '"\n\n[Continue coordinating. Workers: ' + workerNames + '. Use [DELEGATE:name:task] or [DONE] followed by the final answer.]';
+              showArrow(worker.id, managerAgent.id);
             } catch (error) {
               workerStop();
               throw new Error(`Worker ${worker.name} failed: ${error.message}`);
@@ -1092,9 +1192,11 @@
 
     try {
       await processMessageThroughWorkflow(message);
+      clearArrow();
       renderOffice();
       setLog(`Workflow "${state.workflowMode}" complete.`, 'var(--awake)');
     } catch (error) {
+      clearArrow();
       setLog(error.message, '#ef4444');
     }
   }
@@ -1152,6 +1254,10 @@
       state.agents.forEach((a) => { a.bubbleVisible = false; });
     }
     renderOffice();
+  });
+  ids.showHandoffArrows.addEventListener('change', () => {
+    state.showHandoffArrows = ids.showHandoffArrows.checked;
+    if (!state.showHandoffArrows) clearArrow();
   });
   ids.ttsVoiceAssignments.addEventListener('change', (e) => {
     const select = e.target.closest('[data-voice-agent]');
@@ -1413,6 +1519,9 @@
   function renderSettingsModal() {
     if (ids.autoHideBubbles) {
       ids.autoHideBubbles.checked = state.autoHideBubbles;
+    }
+    if (ids.showHandoffArrows) {
+      ids.showHandoffArrows.checked = state.showHandoffArrows;
     }
     if (!ids.ttsSettings || !ids.ttsUnavailable) return;
     if (state.tts.available) {
