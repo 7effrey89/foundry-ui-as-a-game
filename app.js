@@ -5,20 +5,88 @@
       speech: 'Hello office!',
       deskIndex: 0
     },
-    workflowMode: 'group',
-    agents: []
+    workflowMode: 'concurrent',
+    handoffMode: 'previous_response',
+    sequentialOrder: [],
+    maxRounds: 3,
+    triageAgentId: '',
+    managerAgentId: '',
+    trace: [],
+    agents: [],
+    autoHideBubbles: true,
+    showHandoffArrows: true,
+    activeArrow: null,  // { fromId, toId } for handoff arrow visualization
+    tts: {
+      available: false,
+      enabled: false,
+      voices: [],
+      voiceMap: {}   // agentId -> voiceId
+    }
   };
 
   const API_BASE = '/api';
 
-  const DESKS = [
-    { x: 155, y: 290 },
-    { x: 310, y: 290 },
-    { x: 560, y: 290 },
-    { x: 155, y: 420 },
-    { x: 310, y: 420 },
-    { x: 560, y: 420 }
+  // Desk positions as fractions of the 1024×1024 source image (head positions)
+  // Agent i → desk (i+1)%6, person overlay (i+1).png
+  const DESK_IMG = [
+    { ix: 0.74, iy: 0.57, bx: -30 },  // desk 0: person 6.png head (front-right) 
+    { ix: 0.30, iy: 0.30, bx: -30 },  // desk 1: person 1.png head (back-left)
+    { ix: 0.52, iy: 0.25, bx: -30 },  // desk 2: person 2.png head (back-center)
+    { ix: 0.30, iy: 0.53, bx: -30 },  // desk 3: person 3.png head (front-left) //Person number 3
+    { ix: 0.50, iy: 0.43, bx: 0 },    // desk 4: person 4.png head (center)
+    { ix: 0.83, iy: 0.35, bx: -30 }   // desk 5: person 5.png head (back-right)
   ];
+
+  function getDesks() {
+    return DESK_IMG.map(({ ix, iy, bx }) => ({
+      pctX: (ix * 100 - 5).toFixed(2),
+      pctY: (iy * 100 - 3).toFixed(2),
+      bubbleLeft: bx
+    }));
+  }
+
+  const _bubbleTimers = {};
+
+  function showArrow(fromId, toId) {
+    if (!state.showHandoffArrows) return;
+    state.activeArrow = { fromId, toId };
+    renderOffice();
+  }
+
+  function clearArrow() {
+    if (state.activeArrow) {
+      state.activeArrow = null;
+      renderOffice();
+    }
+  }
+
+  function getAgentDeskCenter(agentId) {
+    const enabledAgents = state.agents.filter((a) => a.enabled).slice(0, MAX_ENABLED_AGENTS);
+    const slot = enabledAgents.findIndex((a) => a.id === agentId);
+    if (slot < 0) return null;
+    const desks = getDesks();
+    const deskIdx = (slot + 1) % desks.length;
+    const desk = desks[deskIdx];
+    return { x: parseFloat(desk.pctX) + 5, y: parseFloat(desk.pctY) + 4 };
+  }
+
+  function showBubble(agentId) {
+    const agent = state.agents.find((a) => a.id === agentId);
+    if (!agent) return;
+    agent.bubbleVisible = true;
+    if (_bubbleTimers[agentId]) { clearTimeout(_bubbleTimers[agentId]); delete _bubbleTimers[agentId]; }
+  }
+
+  function scheduleBubbleHide(agentId) {
+    if (!state.autoHideBubbles) return;
+    if (_bubbleTimers[agentId]) clearTimeout(_bubbleTimers[agentId]);
+    _bubbleTimers[agentId] = setTimeout(() => {
+      const agent = state.agents.find((a) => a.id === agentId);
+      if (agent) agent.bubbleVisible = false;
+      delete _bubbleTimers[agentId];
+      renderOffice();
+    }, 10000);
+  }
 
   const THINKING_PHRASES = [
     'Thinking...', 'Looking at tools...',
@@ -29,8 +97,61 @@
   ];
 
   const DOT_SEQUENCE = ['.', '..', '...'];
+  const MAX_ENABLED_AGENTS = 6;
+  const MAX_TRACE_ENTRIES = 300;
+
+  const AGENT_COLORS = [
+    '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
+    '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#06b6d4'
+  ];
+
+  function getAgentColor(agentId) {
+    const idx = state.agents.findIndex((a) => a.id === agentId);
+    if (idx < 0) return '#6b7280';
+    return AGENT_COLORS[idx % AGENT_COLORS.length];
+  }
+
+  const ORCHESTRATION_INFO = {
+    concurrent: {
+      name: 'Concurrent',
+      summary: 'All agents process the same message simultaneously and independently. Results are collected from every agent.',
+      pattern: 'Fan-out \u2192 [Agent A | Agent B | Agent C] \u2192 Collect results',
+      useCase: 'Brainstorming, diverse perspectives, ensemble reasoning, voting',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/concurrent'
+    },
+    sequential: {
+      name: 'Sequential',
+      summary: 'Agents execute one after another in a pipeline. Each agent builds on the previous agent\u2019s output.',
+      pattern: 'Pipeline \u2192 Agent A \u2192 Agent B \u2192 Agent C \u2192 Final',
+      useCase: 'Document review, data processing pipelines, multi-stage reasoning',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/sequential'
+    },
+    handoff: {
+      name: 'Handoff',
+      summary: 'A triage agent routes conversations to specialist agents based on context. Agents transfer control to each other dynamically.',
+      pattern: 'Mesh \u2192 Triage \u21c4 Specialist A \u21c4 Specialist B',
+      useCase: 'Customer support, expert systems, dynamic delegation',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/handoff'
+    },
+    group_chat: {
+      name: 'Group Chat',
+      summary: 'Agents take turns in a shared conversation (round-robin). Each sees the full history and can refine prior work.',
+      pattern: 'Star \u2192 [A \u2192 B \u2192 A \u2192 B \u2026] (N rounds)',
+      useCase: 'Iterative refinement, collaborative problem-solving, writer-reviewer workflows',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/group-chat'
+    },
+    magentic: {
+      name: 'Magentic',
+      summary: 'A manager agent dynamically plans and delegates tasks to specialized worker agents, coordinating the overall workflow.',
+      pattern: 'Hub \u2192 Manager \u21c4 Worker A, Manager \u21c4 Worker B',
+      useCase: 'Complex planning, research tasks, multi-step problem solving',
+      docUrl: 'https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/magentic'
+    }
+  };
 
   function startThinking(agentId) {
+    showBubble(agentId);
+    renderOffice();
     let tick = 0;
     const update = () => {
       const dotIndex = tick % (DOT_SEQUENCE.length + 1);
@@ -58,15 +179,173 @@
     createNpcBtn: document.getElementById('createNpcBtn'),
     loadAgentsBtn: document.getElementById('loadAgentsBtn'),
     workflowMode: document.getElementById('workflowMode'),
+    handoffMode: document.getElementById('handoffMode'),
     userMessage: document.getElementById('userMessage'),
     sendMessageBtn: document.getElementById('sendMessageBtn'),
     agentList: document.getElementById('agentList'),
     office: document.getElementById('office'),
-    eventLog: document.getElementById('eventLog')
+    eventLog: document.getElementById('eventLog'),
+    traceList: document.getElementById('traceList'),
+    clearTraceBtn: document.getElementById('clearTraceBtn'),
+    orchestrationInfo: document.getElementById('orchestrationInfo'),
+    sequentialConfig: document.getElementById('sequentialConfig'),
+    handoffConfig: document.getElementById('handoffConfig'),
+    groupChatConfig: document.getElementById('groupChatConfig'),
+    magenticConfig: document.getElementById('magenticConfig'),
+    triageAgent: document.getElementById('triageAgent'),
+    managerAgent: document.getElementById('managerAgent'),
+    maxRoundsInput: document.getElementById('maxRounds'),
+    createAgentModalBtn: document.getElementById('createAgentModalBtn'),
+    createAgentModal: document.getElementById('createAgentModal'),
+    closeAgentModalBtn: document.getElementById('closeAgentModalBtn'),
+    modalLog: document.getElementById('modalLog'),
+    traceSidebar: document.getElementById('traceSidebar'),
+    traceResizeHandle: document.getElementById('traceResizeHandle'),
+    hideTraceBtn: document.getElementById('hideTraceBtn'),
+    showTraceBtn: document.getElementById('showTraceBtn'),
+    agentDetailModal: document.getElementById('agentDetailModal'),
+    agentDetailTitle: document.getElementById('agentDetailTitle'),
+    agentDetailBody: document.getElementById('agentDetailBody'),
+    closeAgentDetailBtn: document.getElementById('closeAgentDetailBtn'),
+    sequentialOrder: document.getElementById('sequentialOrder'),
+    sidebarFooter: document.getElementById('sidebarFooter'),
+    metricsSummaryModal: document.getElementById('metricsSummaryModal'),
+    metricsSummaryBody: document.getElementById('metricsSummaryBody'),
+    closeMetricsSummaryBtn: document.getElementById('closeMetricsSummaryBtn'),
+    openSettingsBtn: document.getElementById('openSettingsBtn'),
+    settingsModal: document.getElementById('settingsModal'),
+    closeSettingsBtn: document.getElementById('closeSettingsBtn'),
+    autoHideBubbles: document.getElementById('autoHideBubbles'),
+    showHandoffArrows: document.getElementById('showHandoffArrows'),
+    ttsEnabled: document.getElementById('ttsEnabled'),
+    ttsSettings: document.getElementById('ttsSettings'),
+    ttsUnavailable: document.getElementById('ttsUnavailable'),
+    ttsVoiceAssignments: document.getElementById('ttsVoiceAssignments')
   };
 
-  function setLog(message) {
+  function setLog(message, color) {
     ids.eventLog.textContent = message;
+    ids.eventLog.style.color = color || '';
+  }
+
+  function setModalLog(message) {
+    ids.modalLog.textContent = message;
+  }
+
+  function esc(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  }
+
+  function showAgentDetail(agentId) {
+    const agent = state.agents.find((a) => a.id === agentId);
+    if (!agent) return;
+
+    ids.agentDetailTitle.textContent = agent.name;
+
+    const rows = [
+      ['Foundry ID', agent.foundryAgentId || '—'],
+      ['Name', agent.foundryAgentName || agent.name],
+      ['Kind', agent.kind || '—'],
+      ['Model', agent.model || '—'],
+      ['Guardrail', agent.guardrail || 'None'],
+      ['Status', agent.enabled ? 'Enabled' : 'Disabled'],
+    ];
+
+    let html = '<table>';
+    rows.forEach(([label, val]) => {
+      html += `<tr><th>${esc(label)}</th><td>${esc(val)}</td></tr>`;
+    });
+    html += '</table>';
+
+    html += '<h3>System Prompt / Instructions</h3>';
+    html += `<pre>${esc(agent.description || 'None')}</pre>`;
+
+    if (agent.tools && agent.tools.length) {
+      html += '<h3>Tools</h3><ul>';
+      agent.tools.forEach((t) => { html += `<li>${esc(t)}</li>`; });
+      html += '</ul>';
+    }
+    if (agent.knowledge && agent.knowledge.length) {
+      html += '<h3>Knowledge Sources</h3><ul>';
+      agent.knowledge.forEach((k) => { html += `<li>${esc(k)}</li>`; });
+      html += '</ul>';
+    }
+    if (agent.memory && agent.memory.length) {
+      html += '<h3>Memory Stores</h3><ul>';
+      agent.memory.forEach((m) => { html += `<li>${esc(m)}</li>`; });
+      html += '</ul>';
+    }
+    if (agent.toolsRaw && agent.toolsRaw.length) {
+      html += '<h3>Raw Tool Definitions</h3>';
+      html += `<pre>${esc(JSON.stringify(agent.toolsRaw, null, 2))}</pre>`;
+    }
+    if (agent.raiConfig && Object.keys(agent.raiConfig).length) {
+      html += '<h3>RAI / Content Safety Config</h3>';
+      html += `<pre>${esc(JSON.stringify(agent.raiConfig, null, 2))}</pre>`;
+    }
+
+    // ── Operational Metrics ──────────────────────
+    const m = agent.metrics;
+    if (m && m.runs > 0) {
+      html += '<h3>Operational Metrics</h3>';
+      html += '<table>';
+      html += `<tr><th>Runs</th><td>${m.runs}</td></tr>`;
+      html += `<tr><th>Errors</th><td>${m.errors || 0}</td></tr>`;
+      html += `<tr><th>Error Rate</th><td>${m.runs ? ((m.errors || 0) / m.runs * 100).toFixed(1) + '%' : '—'}</td></tr>`;
+      html += `<tr><th>Prompt Tokens</th><td>${(m.prompt_tokens || 0).toLocaleString()}</td></tr>`;
+      html += `<tr><th>Completion Tokens</th><td>${(m.completion_tokens || 0).toLocaleString()}</td></tr>`;
+      html += `<tr><th>Total Tokens</th><td>${(m.total_tokens || 0).toLocaleString()}</td></tr>`;
+      html += `<tr><th>Tool Calls</th><td>${m.tool_calls || 0}</td></tr>`;
+      html += '</table>';
+    } else {
+      html += '<h3>Operational Metrics</h3>';
+      html += '<p style="color:var(--muted);font-size:0.8rem">No runs recorded yet. Send a message to start tracking.</p>';
+    }
+
+    ids.agentDetailBody.innerHTML = html;
+    ids.agentDetailModal.style.display = 'flex';
+  }
+
+  function renderSidebarFooter() {
+    if (!ids.sidebarFooter) return;
+    const agentsWithMetrics = state.agents.filter((a) => a.metrics && a.metrics.runs > 0);
+    let totalTokens = 0;
+    agentsWithMetrics.forEach((a) => { totalTokens += a.metrics.total_tokens || 0; });
+    if (!agentsWithMetrics.length) {
+      ids.sidebarFooter.innerHTML = '<span class="footer-stat">No usage yet</span>';
+      return;
+    }
+    ids.sidebarFooter.innerHTML = `<span class="footer-stat clickable-bubble" id="openMetricsSummary" title="View statistics">📊 ${totalTokens.toLocaleString()} tokens · ${agentsWithMetrics.length} agent${agentsWithMetrics.length !== 1 ? 's' : ''}</span>`;
+  }
+
+  function showMetricsSummary() {
+    const agentsWithMetrics = state.agents.filter((a) => a.metrics && a.metrics.runs > 0);
+    if (!agentsWithMetrics.length) return;
+
+    const totals = { runs: 0, errors: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, tool_calls: 0 };
+    agentsWithMetrics.forEach((a) => {
+      const m = a.metrics;
+      totals.runs += m.runs || 0;
+      totals.errors += m.errors || 0;
+      totals.prompt_tokens += m.prompt_tokens || 0;
+      totals.completion_tokens += m.completion_tokens || 0;
+      totals.total_tokens += m.total_tokens || 0;
+      totals.tool_calls += m.tool_calls || 0;
+    });
+
+    let html = '<table class="metrics-summary-table">';
+    html += '<thead><tr><th>Agent</th><th>Model</th><th>Runs</th><th>Errors</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Tools</th></tr></thead>';
+    html += '<tbody>';
+    agentsWithMetrics.forEach((a) => {
+      const m = a.metrics;
+      const status = a.enabled ? '🟢' : '⚪';
+      html += `<tr><td>${status} ${esc(a.name)}</td><td>${esc(a.model || '—')}</td><td>${m.runs}</td><td>${m.errors || 0}</td><td>${(m.prompt_tokens || 0).toLocaleString()}</td><td>${(m.completion_tokens || 0).toLocaleString()}</td><td>${(m.total_tokens || 0).toLocaleString()}</td><td>${m.tool_calls || 0}</td></tr>`;
+    });
+    html += `<tr class="metrics-totals-row"><td><strong>Total</strong></td><td></td><td><strong>${totals.runs}</strong></td><td><strong>${totals.errors}</strong></td><td><strong>${totals.prompt_tokens.toLocaleString()}</strong></td><td><strong>${totals.completion_tokens.toLocaleString()}</strong></td><td><strong>${totals.total_tokens.toLocaleString()}</strong></td><td><strong>${totals.tool_calls}</strong></td></tr>`;
+    html += '</tbody></table>';
+
+    ids.metricsSummaryBody.innerHTML = html;
+    ids.metricsSummaryModal.style.display = 'flex';
   }
 
   function createLocalId() {
@@ -113,12 +392,14 @@
     return { id: result.id, name: result.name || name };
   }
 
-  async function sendMessageToFoundryAgent(agent, message) {
-    const result = await foundryRequest('/messages', 'POST', {
-      agentName: agent.foundryAgentName,
-      message
-    });
-    return result?.response || 'No response received from agent.';
+  async function sendMessageToFoundryAgent(agent, message, context) {
+    const body = { agentName: agent.foundryAgentName, message };
+    if (context && context.length) { body.context = context; }
+    const result = await foundryRequest('/messages', 'POST', body);
+    if (result && result.usage) {
+      agent.metrics = result.usage;
+    }
+    return result;
   }
 
   async function fetchAgents() {
@@ -145,12 +426,16 @@
 
     const stopThinking = startThinking(agent.id);
     try {
-      const response = await sendMessageToFoundryAgent(agent, message);
+      const result = await sendMessageToFoundryAgent(agent, message);
       stopThinking();
+      const response = result?.response || 'No response received from agent.';
       agent.lastSpeech = response;
+      addTraceEntries(agent, result, 'direct');
+      scheduleBubbleHide(agent.id);
       renderOffice();
       renderAgentsPanel();
       setLog(`${agent.name} responded.`);
+      speakText(response, agent.id);
     } catch (error) {
       stopThinking();
       setLog(error.message);
@@ -158,7 +443,161 @@
   }
 
   function getDeskForAgent(index) {
-    return DESKS[(index + 1) % DESKS.length];
+    const desks = getDesks();
+    return desks[(index + 1) % desks.length];
+  }
+
+  function shortText(value, max = 140) {
+    if (!value) return '';
+    if (value.length <= max) return value;
+    return `${value.slice(0, max)}...`;
+  }
+
+  function formatTime(date = new Date()) {
+    return date.toLocaleTimeString();
+  }
+
+  function renderTracePanel() {
+    if (!ids.traceList) return;
+    ids.traceList.innerHTML = '';
+    if (!state.trace.length) {
+      const empty = document.createElement('p');
+      empty.className = 'status';
+      empty.textContent = 'No trace events yet.';
+      ids.traceList.appendChild(empty);
+      return;
+    }
+
+    state.trace.forEach((entry, idx) => {
+      const item = document.createElement('article');
+      item.className = 'trace-item';
+      if (entry.type === 'final_response' || entry.type === 'user_message') {
+        item.classList.add(entry.type === 'final_response' ? 'trace-item-final' : 'trace-item-user');
+      } else {
+        item.classList.add('trace-item-intermediate');
+      }
+      item.dataset.traceIdx = idx;
+      const color = entry.agentId === 'user' ? '#6b7280' : getAgentColor(entry.agentId);
+      item.style.borderLeftColor = color;
+
+      const meta = document.createElement('div');
+      meta.className = 'trace-meta';
+      const dot = `<span class="trace-dot" style="background:${color}"></span>`;
+      meta.innerHTML = `${dot}${entry.time} \u2022 ${entry.agentName.replace(/&/g, '&amp;').replace(/</g, '&lt;')} \u2022 ${entry.type}`;
+
+      const summary = document.createElement('div');
+      summary.className = 'trace-summary';
+      summary.textContent = entry.summary;
+
+      item.appendChild(meta);
+      item.appendChild(summary);
+
+      // Expand button when full text is longer than summary
+      if (entry.fullText && entry.fullText.length > entry.summary.length) {
+        const expandBtn = document.createElement('button');
+        expandBtn.className = 'trace-expand-btn';
+        expandBtn.textContent = 'Show more';
+        expandBtn.type = 'button';
+        let expanded = false;
+        expandBtn.addEventListener('click', () => {
+          expanded = !expanded;
+          if (expanded) {
+            summary.textContent = entry.fullText;
+            expandBtn.textContent = 'Show less';
+          } else {
+            summary.textContent = entry.summary;
+            expandBtn.textContent = 'Show more';
+          }
+        });
+        item.appendChild(expandBtn);
+      }
+
+      ids.traceList.appendChild(item);
+    });
+  }
+
+  function addTrace(entry) {
+    state.trace.push({
+      time: formatTime(),
+      ...entry
+    });
+    if (state.trace.length > MAX_TRACE_ENTRIES) {
+      state.trace = state.trace.slice(state.trace.length - MAX_TRACE_ENTRIES);
+    }
+    renderTracePanel();
+  }
+
+  function scrollToTraceForAgent(agentId) {
+    // Open the trace sidebar if hidden
+    if (ids.traceSidebar.style.display === 'none') {
+      ids.traceSidebar.style.display = '';
+      ids.showTraceBtn.style.display = 'none';
+      document.querySelector('.app').style.marginRight = ids.traceSidebar.style.width || '';
+    }
+
+    // Find the last final_response for this agent
+    let targetIdx = -1;
+    for (let i = state.trace.length - 1; i >= 0; i--) {
+      if (state.trace[i].agentId === agentId && state.trace[i].type === 'final_response') {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx < 0) return;
+
+    const el = ids.traceList.querySelector(`[data-trace-idx="${targetIdx}"]`);
+    if (!el) return;
+
+    // Remove any existing highlight
+    const prev = ids.traceList.querySelector('.trace-highlight');
+    if (prev) prev.classList.remove('trace-highlight');
+
+    el.classList.add('trace-highlight');
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Auto-remove highlight after 4s
+    setTimeout(() => el.classList.remove('trace-highlight'), 4000);
+  }
+
+  function addTraceEntries(agent, result, channel) {
+    const traceEntries = Array.isArray(result?.trace) ? result.trace : [];
+    if (!traceEntries.length) {
+      return;
+    }
+
+    traceEntries.forEach((entry) => {
+      addTrace({
+        agentName: agent.name,
+        agentId: agent.id,
+        type: entry.type || channel,
+        summary: entry.summary || shortText(entry.text || ''),
+        fullText: entry.text || ''
+      });
+    });
+
+    let latestForBubble = null;
+    for (let i = traceEntries.length - 1; i >= 0; i -= 1) {
+      const entry = traceEntries[i];
+      if (entry.type === 'tool_approval_request' || entry.type === 'tool_approval_response' || entry.type === 'reasoning') {
+        latestForBubble = entry;
+        break;
+      }
+    }
+    if (!latestForBubble) {
+      latestForBubble = traceEntries[traceEntries.length - 1];
+    }
+    const bubbleSummary = latestForBubble?.text || latestForBubble?.summary || '';
+    if (bubbleSummary) {
+      agent.bubbleSpeech = shortText(bubbleSummary, 70);
+      showBubble(agent.id);
+    }
+  }
+
+  function buildSequentialHandoffMessage(originalUserMessage, previousAgentResponse) {
+    if (state.handoffMode === 'append_history') {
+      return `${originalUserMessage}\n\nPrevious agent response: ${previousAgentResponse}`;
+    }
+    return `Previous agent response: ${previousAgentResponse}`;
   }
 
   function renderAgentsPanel() {
@@ -171,8 +610,11 @@
     state.agents.forEach((agent) => {
       const card = document.createElement('div');
       card.className = 'agent-card';
+      const agentColor = getAgentColor(agent.id);
+      card.style.borderLeftColor = agentColor;
 
       const escapedName = agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const escapedDesc = (agent.description || 'No system prompt').replace(/&/g, '&amp;').replace(/</g, '&lt;');
       const escapedSpeech = (agent.lastSpeech || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
       function badges(label, items, cls) {
@@ -184,53 +626,122 @@
         badges('🔧', agent.tools, 'badge-tool'),
         badges('📚', agent.knowledge, 'badge-knowledge'),
         badges('🧠', agent.memory, 'badge-memory'),
-        agent.guardrail ? `<span class="badge badge-guardrail">🛡️ ${agent.guardrail.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>` : ''
+        agent.guardrail ? `<span class="badge badge-guardrail">🛡️ ${agent.guardrail.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>` : '',
+        agent.metrics && agent.metrics.runs > 0
+          ? `<span class="badge badge-metrics">📊 ${agent.metrics.runs} run${agent.metrics.runs !== 1 ? 's' : ''} · ${(agent.metrics.total_tokens || 0).toLocaleString()} tok</span>`
+          : ''
       ].filter(Boolean).join(' ');
 
       card.innerHTML = `
-        <div class="agent-name">${escapedName}</div>
-        <div class="status">${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</div>
+        <div class="agent-name"><span class="agent-color-dot" style="background:${agentColor}"></span><a href="#" class="agent-name-link" data-agent-detail="${agent.id}" title="See details for ${escapedName}">${escapedName}</a><span class="info-bubble" data-tooltip="${escapedDesc}">i</span></div>
+        <div class="status"><label title="Click to enable or disable"><input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" /> ${agent.enabled ? 'Online at desk' : 'Sleeping at desk'}</label></div>
         ${badgeHtml ? '<div class="agent-badges">' + badgeHtml + '</div>' : ''}
-        <label>
-          <input type="checkbox" ${agent.enabled ? 'checked' : ''} data-agent-toggle="${agent.id}" />
-          Enabled
-        </label>
         <div class="agent-chat">
-          <div class="agent-last-speech" data-agent-speech="${agent.id}">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
+          <div class="agent-last-speech clickable-bubble" data-agent-speech="${agent.id}" data-speech-agent="${agent.id}" title="Click to see full text in session trace">${escapedSpeech ? '💬 ' + escapedSpeech : ''}</div>
           <div class="row agent-chat-row">
             <input data-agent-input="${agent.id}" placeholder="Say something to ${escapedName}..." />
-            <button data-agent-send="${agent.id}">Chat</button>
+            <button data-agent-send="${agent.id}" title="Ask ${escapedName} a question">Chat</button>
           </div>
         </div>
       `;
       ids.agentList.appendChild(card);
     });
+    renderSidebarFooter();
   }
 
-  function createDeskElement({ x, y }, label, spriteClass, bubbleText, agentId) {
+  function createDeskElement(pos, label, spriteClass, bubbleText, agentId, agentColor) {
     const desk = document.createElement('div');
     desk.className = 'iso-desk';
-    desk.style.left = `${x}px`;
-    desk.style.top = `${y}px`;
+    if (spriteClass === 'empty') desk.classList.add('empty-desk');
+    desk.style.left = `${pos.pctX}%`;
+    desk.style.top = `${pos.pctY}%`;
 
-    const name = document.createElement('div');
-    name.className = 'iso-label';
-    name.textContent = label;
-    desk.appendChild(name);
+    const nameRow = document.createElement('div');
+    nameRow.className = 'iso-label';
 
-    const dot = document.createElement('div');
+    const dot = document.createElement('span');
     dot.className = `desk-status ${spriteClass}`;
-    desk.appendChild(dot);
+    if (agentColor) dot.style.background = agentColor;
+    nameRow.appendChild(dot);
+
+    const text = document.createElement('span');
+    text.textContent = label;
+    nameRow.appendChild(text);
+
+    desk.appendChild(nameRow);
 
     if (bubbleText) {
       const bubble = document.createElement('div');
       bubble.className = 'px-bubble';
+      if (pos.bubbleLeft !== undefined) bubble.style.left = `${pos.bubbleLeft}px`;
       bubble.textContent = bubbleText;
-      if (agentId) bubble.dataset.agentBubble = agentId;
+      if (agentId) {
+        bubble.dataset.agentBubble = agentId;
+        bubble.classList.add('clickable-bubble');
+        bubble.style.setProperty('--agent-color', agentColor || '#3b82f6');
+        bubble.title = 'Click to see full text in session trace';
+        bubble.addEventListener('click', () => scrollToTraceForAgent(agentId));
+      }
       desk.appendChild(bubble);
     }
 
     return desk;
+  }
+
+  function showSeatAssignDropdown(deskEl, slotIndex) {
+    // Remove any existing dropdown
+    const existing = document.querySelector('.seat-assign-dropdown');
+    if (existing) existing.remove();
+
+    const disabledAgents = state.agents.filter((a) => !a.enabled);
+    if (!disabledAgents.length) {
+      const dd = document.createElement('div');
+      dd.className = 'seat-assign-dropdown';
+      const item = document.createElement('div');
+      item.className = 'seat-option no-agents';
+      item.textContent = 'No available agents';
+      dd.appendChild(item);
+      deskEl.appendChild(dd);
+      setTimeout(() => dd.remove(), 2000);
+      return;
+    }
+
+    const dd = document.createElement('div');
+    dd.className = 'seat-assign-dropdown';
+
+    disabledAgents.forEach((agent) => {
+      const item = document.createElement('div');
+      item.className = 'seat-option';
+      const color = getAgentColor(agent.id);
+      item.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:4px;vertical-align:middle"></span>${agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;')}`;
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const enabledCount = state.agents.filter((a) => a.enabled).length;
+        if (enabledCount >= MAX_ENABLED_AGENTS) {
+          setLog(`Max ${MAX_ENABLED_AGENTS} agents can be online at once.`);
+          dd.remove();
+          return;
+        }
+        agent.enabled = true;
+        dd.remove();
+        renderAgentsPanel();
+        renderOffice();
+        populateAgentSelectors();
+        setLog(`${agent.name} assigned to desk and is now online.`);
+      });
+      dd.appendChild(item);
+    });
+
+    deskEl.appendChild(dd);
+
+    // Close on click outside
+    const closeHandler = (e) => {
+      if (!dd.contains(e.target) && !deskEl.contains(e.target)) {
+        dd.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
   }
 
   function renderOffice() {
@@ -239,29 +750,97 @@
     const scene = document.createElement('div');
     scene.className = 'iso-scene';
 
-    // Person image layers (1.png through 6.png)
-    state.agents.forEach((agent, index) => {
-      if (index >= 6) return;
+    // Only enabled agents get desks and person overlays (max 5)
+    const enabledAgents = state.agents.filter((a) => a.enabled).slice(0, MAX_ENABLED_AGENTS);
+    const desks = getDesks();
+
+    // Person image layers (1.png through 6.png) — assigned dynamically to enabled agents
+    enabledAgents.forEach((agent, slot) => {
       const img = document.createElement('img');
-      img.src = `assets/img/${index + 1}.png`;
-      img.className = 'person-layer' + (agent.enabled ? '' : ' hidden');
+      img.src = `assets/img/${slot + 1}.png`;
+      img.className = 'person-layer';
       img.alt = agent.name;
       scene.appendChild(img);
     });
 
-    // Desks (overlay labels + bubbles on background image)
-    const userDesk = DESKS[state.user.deskIndex];
-    scene.appendChild(createDeskElement(userDesk, state.user.name, 'user', state.user.speech));
-
-    state.agents.forEach((agent, index) => {
-      const desk = getDeskForAgent(index);
-      const spriteClass = agent.enabled ? 'awake' : 'nap';
-      const bubble = agent.enabled ? agent.lastSpeech : 'Zzz...';
-      scene.appendChild(createDeskElement(desk, agent.name, spriteClass, bubble, agent.id));
+    // Desks (overlay labels + bubbles)
+    const usedDesks = new Set();
+    enabledAgents.forEach((agent, slot) => {
+      const deskIdx = (slot + 1) % desks.length;
+      usedDesks.add(deskIdx);
+      const desk = desks[deskIdx];
+      const bubbleRaw = agent.bubbleSpeech || agent.lastSpeech || '';
+      const bubble = state.autoHideBubbles ? (agent.bubbleVisible ? bubbleRaw : '') : bubbleRaw;
+      const color = getAgentColor(agent.id);
+      const deskEl = createDeskElement(desk, agent.name, 'awake', bubble, agent.id, color);
+      scene.appendChild(deskEl);
     });
 
-    for (let i = state.agents.length + 1; i < DESKS.length; i += 1) {
-      scene.appendChild(createDeskElement(DESKS[i], 'Empty Seat', 'empty'));
+    // Fill remaining desks as empty (clickable to assign)
+    for (let i = 0; i < desks.length; i += 1) {
+      if (usedDesks.has(i)) continue;
+      const emptyDesk = createDeskElement(desks[i], 'Empty Seat', 'empty');
+      const slotIndex = i;
+      emptyDesk.addEventListener('click', () => showSeatAssignDropdown(emptyDesk, slotIndex));
+      scene.appendChild(emptyDesk);
+    }
+
+    // ── Animated handoff arrow ─────────────────
+    if (state.activeArrow) {
+      const from = getAgentDeskCenter(state.activeArrow.fromId);
+      const to = getAgentDeskCenter(state.activeArrow.toId);
+      if (from && to) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.classList.add('arrow-overlay');
+        svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('preserveAspectRatio', 'none');
+
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'arrowhead');
+        marker.setAttribute('markerWidth', '6');
+        marker.setAttribute('markerHeight', '4');
+        marker.setAttribute('refX', '5');
+        marker.setAttribute('refY', '2');
+        marker.setAttribute('orient', 'auto');
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', '0 0, 6 2, 0 4');
+        polygon.setAttribute('fill', '#22c55e');
+        marker.appendChild(polygon);
+        defs.appendChild(marker);
+        svg.appendChild(defs);
+
+        // Shorten line so it doesn't overlap the desks
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const pad = len > 10 ? 3 : 0;
+        const ux = dx / len;
+        const uy = dy / len;
+        const x1 = from.x + ux * pad;
+        const y1 = from.y + uy * pad;
+        const x2 = to.x - ux * pad;
+        const y2 = to.y - uy * pad;
+
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.setAttribute('stroke', '#22c55e');
+        line.setAttribute('stroke-width', '0.5');
+        line.setAttribute('stroke-dasharray', '2 1');
+        line.setAttribute('marker-end', 'url(#arrowhead)');
+        line.classList.add('arrow-line');
+
+        // Set dash length for animation
+        const lineLen = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+        line.style.strokeDasharray = `2 1`;
+        line.style.setProperty('--arrow-len', lineLen);
+
+        svg.appendChild(line);
+        scene.appendChild(svg);
+      }
     }
 
     ids.office.appendChild(scene);
@@ -271,29 +850,303 @@
     const name = ids.npcName.value.trim();
     const description = ids.npcDescription.value.trim();
     if (!name || !description) {
-      setLog('NPC name and description are required.');
+      setModalLog('NPC name and description are required.');
       return;
     }
 
     try {
-      setLog(`Creating Foundry agent "${name}"...`);
+      setModalLog(`Creating Foundry agent "${name}"...`);
       const foundryAgent = await createFoundryAgent(name, description);
+      const enabledCount = state.agents.filter((a) => a.enabled).length;
       state.agents.push({
         id: createLocalId(),
         name,
         description,
         foundryAgentId: foundryAgent.id,
         foundryAgentName: foundryAgent.name,
-        enabled: true,
-        lastSpeech: 'Ready to help!'
+        enabled: enabledCount < MAX_ENABLED_AGENTS,
+        metrics: null,
+        lastSpeech: 'Ready to help!',
+        bubbleSpeech: ''
       });
       ids.npcName.value = '';
       ids.npcDescription.value = '';
+      setModalLog('');
+      ids.createAgentModal.style.display = 'none';
       renderAgentsPanel();
       renderOffice();
-      setLog(`Created NPC "${name}" (Foundry ID: ${foundryAgentId}).`);
+      setLog(`Created NPC "${name}" (Foundry ID: ${foundryAgent.id}).`);
     } catch (error) {
-      setLog(error.message);
+      setModalLog(error.message);
+    }
+  }
+
+  async function runConcurrent(message, enabledAgents) {
+    const stopFns = enabledAgents.map((agent) => startThinking(agent.id));
+    const results = await Promise.allSettled(enabledAgents.map(async (agent, i) => {
+      addTrace({
+        agentName: agent.name,
+        agentId: agent.id,
+        type: 'concurrent_dispatch',
+        summary: `Concurrent dispatch: "${shortText(message)}"`
+      });
+      try {
+        const result = await sendMessageToFoundryAgent(agent, message);
+        stopFns[i]();
+        const response = result?.response || 'No response received from agent.';
+        agent.lastSpeech = response;
+        addTraceEntries(agent, result, 'concurrent');
+        scheduleBubbleHide(agent.id);
+        renderOffice();
+        renderAgentsPanel();
+        speakText(response, agent.id);
+      } catch (error) {
+        stopFns[i]();
+        throw new Error(`Agent ${agent.name} failed: ${error.message}`);
+      }
+    }));
+    stopFns.forEach((fn) => fn());
+    const failures = results
+      .filter((r) => r.status === 'rejected')
+      .map((r) => r.reason.message);
+    if (failures.length) throw new Error(failures.join(' | '));
+  }
+
+  async function runSequential(message, enabledAgents) {
+    // Use configured order if available
+    let orderedAgents = enabledAgents;
+    if (state.sequentialOrder.length) {
+      const ordered = state.sequentialOrder
+        .map((id) => enabledAgents.find((a) => a.id === id))
+        .filter(Boolean);
+      // Append any enabled agents not in the order list
+      const orderedIds = new Set(ordered.map((a) => a.id));
+      enabledAgents.forEach((a) => { if (!orderedIds.has(a.id)) ordered.push(a); });
+      orderedAgents = ordered;
+    }
+    let rollingMessage = message;
+    let prevAgentId = null;
+    for (const agent of orderedAgents) {
+      if (prevAgentId) showArrow(prevAgentId, agent.id);
+      const stopThinking = startThinking(agent.id);
+      addTrace({
+        agentName: agent.name,
+        agentId: agent.id,
+        type: 'sequential_step',
+        summary: `Sequential step (${state.handoffMode}): "${shortText(rollingMessage)}"`
+      });
+      try {
+        const result = await sendMessageToFoundryAgent(agent, rollingMessage);
+        stopThinking();
+        const response = result?.response || 'No response received from agent.';
+        agent.lastSpeech = response;
+        addTraceEntries(agent, result, 'sequential');
+        scheduleBubbleHide(agent.id);
+        rollingMessage = buildSequentialHandoffMessage(message, response);
+        prevAgentId = agent.id;
+        renderOffice();
+        renderAgentsPanel();
+        speakText(response, agent.id);
+      } catch (error) {
+        stopThinking();
+        throw new Error(`Agent ${agent.name} failed: ${error.message}`);
+      }
+    }
+  }
+
+  async function runHandoff(message, enabledAgents) {
+    const triageAgent = enabledAgents.find((a) => a.id === state.triageAgentId) || enabledAgents[0];
+    const otherAgents = enabledAgents.filter((a) => a.id !== triageAgent.id);
+    const agentDirectory = otherAgents.map((a) => a.name).join(', ');
+    const MAX_HANDOFFS = 5;
+    let currentAgent = triageAgent;
+    let currentMessage = message;
+    if (otherAgents.length) {
+      currentMessage += '\n\n[You are part of a handoff workflow. Available specialist agents: ' + agentDirectory +
+        '. If this question needs a specialist, end your response with [HANDOFF:agent_name]. Otherwise respond normally.]';
+    }
+    const context = [];
+    let previousHandoffAgent = null;
+    for (let hop = 0; hop < MAX_HANDOFFS; hop++) {
+      if (previousHandoffAgent) showArrow(previousHandoffAgent.id, currentAgent.id);
+      const stopThinking = startThinking(currentAgent.id);
+      addTrace({
+        agentName: currentAgent.name,
+        agentId: currentAgent.id,
+        type: 'handoff_receive',
+        summary: `Handoff step ${hop + 1}: ${currentAgent.name} processing`
+      });
+      try {
+        const result = await sendMessageToFoundryAgent(currentAgent, currentMessage, context);
+        stopThinking();
+        const response = result?.response || 'No response received from agent.';
+        currentAgent.lastSpeech = response;
+        addTraceEntries(currentAgent, result, 'handoff');
+        scheduleBubbleHide(currentAgent.id);
+        renderOffice();
+        renderAgentsPanel();
+        speakText(response, currentAgent.id);
+        const handoffMatch = response.match(/\[HANDOFF:([^\]]+)\]/i);
+        if (handoffMatch) {
+          const targetName = handoffMatch[1].trim();
+          const targetAgent = enabledAgents.find((a) =>
+            a.name.toLowerCase() === targetName.toLowerCase() ||
+            (a.foundryAgentName || '').toLowerCase() === targetName.toLowerCase()
+          );
+          if (targetAgent && targetAgent.id !== currentAgent.id) {
+            addTrace({
+              agentName: currentAgent.name,
+              agentId: currentAgent.id,
+              type: 'handoff_transfer',
+              summary: `${currentAgent.name} \u2192 ${targetAgent.name}`
+            });
+            context.push({ role: 'assistant', content: response });
+            const remaining = enabledAgents.filter((a) => a.id !== targetAgent.id).map((a) => a.name).join(', ');
+            currentMessage = message + '\n\n[You received a handoff. Prior agent said: ' +
+              response.replace(/\[HANDOFF:[^\]]+\]/gi, '').trim() +
+              (remaining ? '\nAvailable agents for further handoff: ' + remaining + '. End with [HANDOFF:agent_name] to transfer, or respond normally.]' : ']');
+            previousHandoffAgent = currentAgent;
+            currentAgent = targetAgent;
+            continue;
+          }
+        }
+        break;
+      } catch (error) {
+        stopThinking();
+        throw new Error(`Agent ${currentAgent.name} failed: ${error.message}`);
+      }
+    }
+  }
+
+  async function runGroupChat(message, enabledAgents) {
+    const maxRounds = state.maxRounds || 3;
+    const conversation = [];
+    let roundMessage = message;
+    let prevGroupAgent = null;
+    for (let round = 0; round < maxRounds; round++) {
+      for (const agent of enabledAgents) {
+        if (prevGroupAgent) showArrow(prevGroupAgent.id, agent.id);
+        const stopThinking = startThinking(agent.id);
+        addTrace({
+          agentName: agent.name,
+          agentId: agent.id,
+          type: 'group_chat_turn',
+          summary: `Round ${round + 1}: ${agent.name}'s turn`
+        });
+        try {
+          const result = await sendMessageToFoundryAgent(agent, roundMessage, conversation);
+          stopThinking();
+          const response = result?.response || 'No response received from agent.';
+          agent.lastSpeech = response;
+          addTraceEntries(agent, result, 'group_chat');
+          scheduleBubbleHide(agent.id);
+          conversation.push({ role: 'assistant', content: '[' + agent.name + ']: ' + response });
+          roundMessage = 'Continue the group discussion. Original task: ' + message;
+          renderOffice();
+          renderAgentsPanel();
+          speakText(response, agent.id);
+          prevGroupAgent = agent;
+        } catch (error) {
+          stopThinking();
+          throw new Error(`Agent ${agent.name} failed: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  async function runMagentic(message, enabledAgents) {
+    const managerAgent = enabledAgents.find((a) => a.id === state.managerAgentId) || enabledAgents[0];
+    const workerAgents = enabledAgents.filter((a) => a.id !== managerAgent.id);
+    const workerNames = workerAgents.map((a) => a.name).join(', ');
+    const MAX_ITERATIONS = 5;
+    const context = [];
+    if (!workerAgents.length) {
+      const stopThinking = startThinking(managerAgent.id);
+      addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_solo', summary: 'Only one agent \u2014 running directly' });
+      try {
+        const result = await sendMessageToFoundryAgent(managerAgent, message);
+        stopThinking();
+        managerAgent.lastSpeech = result?.response || 'No response received from agent.';
+        addTraceEntries(managerAgent, result, 'magentic');
+        scheduleBubbleHide(managerAgent.id);
+        renderOffice();
+        renderAgentsPanel();
+        speakText(managerAgent.lastSpeech, managerAgent.id);
+      } catch (error) {
+        stopThinking();
+        throw new Error(`Agent ${managerAgent.name} failed: ${error.message}`);
+      }
+      return;
+    }
+    let managerMessage = message + '\n\n[You are a manager agent. Your workers: ' + workerNames +
+      '. Delegate by responding with [DELEGATE:agent_name:task description]. When finished, respond with [DONE] followed by the final answer.]';
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+      const stopThinking = startThinking(managerAgent.id);
+      addTrace({
+        agentName: managerAgent.name,
+        agentId: managerAgent.id,
+        type: 'magentic_plan',
+        summary: `Manager planning (iteration ${i + 1})`
+      });
+      try {
+        const result = await sendMessageToFoundryAgent(managerAgent, managerMessage, context);
+        stopThinking();
+        const response = result?.response || 'No response received from agent.';
+        managerAgent.lastSpeech = response;
+        addTraceEntries(managerAgent, result, 'magentic');
+        scheduleBubbleHide(managerAgent.id);
+        renderOffice();
+        renderAgentsPanel();
+        if (response.includes('[DONE]')) {
+          addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_done', summary: 'Manager declared workflow complete' });
+          managerAgent.lastSpeech = response.replace(/\[DONE\]/gi, '').trim();
+          scheduleBubbleHide(managerAgent.id);
+          renderOffice();
+          renderAgentsPanel();
+          break;
+        }
+        const delegateMatch = response.match(/\[DELEGATE:([^:]+):([^\]]+)\]/i);
+        if (delegateMatch) {
+          const workerName = delegateMatch[1].trim();
+          const task = delegateMatch[2].trim();
+          const worker = workerAgents.find((a) =>
+            a.name.toLowerCase() === workerName.toLowerCase() ||
+            (a.foundryAgentName || '').toLowerCase() === workerName.toLowerCase()
+          );
+          if (worker) {
+            showArrow(managerAgent.id, worker.id);
+            addTrace({ agentName: managerAgent.name, agentId: managerAgent.id, type: 'magentic_delegate', summary: `Manager \u2192 ${worker.name}: "${shortText(task)}"` });
+            const workerStop = startThinking(worker.id);
+            try {
+              const workerResult = await sendMessageToFoundryAgent(worker, task);
+              workerStop();
+              const workerResponse = workerResult?.response || 'No response received from agent.';
+              worker.lastSpeech = workerResponse;
+              addTraceEntries(worker, workerResult, 'magentic');
+              scheduleBubbleHide(worker.id);
+              renderOffice();
+              renderAgentsPanel();
+              speakText(workerResponse, worker.id);
+              context.push({ role: 'assistant', content: response });
+              context.push({ role: 'user', content: 'Worker ' + worker.name + ' completed the task: ' + workerResponse });
+              managerMessage = 'Worker ' + worker.name + ' responded: "' + workerResponse +
+                '"\n\n[Continue coordinating. Workers: ' + workerNames + '. Use [DELEGATE:name:task] or [DONE] followed by the final answer.]';
+              showArrow(worker.id, managerAgent.id);
+            } catch (error) {
+              workerStop();
+              throw new Error(`Worker ${worker.name} failed: ${error.message}`);
+            }
+          } else {
+            context.push({ role: 'assistant', content: response });
+            managerMessage = 'Worker "' + workerName + '" not found. Available: ' + workerNames + '. Use [DELEGATE:name:task] or [DONE].';
+          }
+        } else {
+          break;
+        }
+      } catch (error) {
+        stopThinking();
+        throw new Error(`Manager ${managerAgent.name} failed: ${error.message}`);
+      }
     }
   }
 
@@ -303,43 +1156,21 @@
       setLog('No enabled agents are online.');
       return;
     }
-
-    if (state.workflowMode === 'group') {
-      const stopFns = enabledAgents.map((agent) => startThinking(agent.id));
-      const results = await Promise.allSettled(enabledAgents.map(async (agent, i) => {
-        try {
-          const response = await sendMessageToFoundryAgent(agent, message);
-          stopFns[i]();
-          agent.lastSpeech = response;
-        } catch (error) {
-          stopFns[i]();
-          throw new Error(`Agent ${agent.name} failed in group workflow: ${error.message}`);
-        }
-      }));
-
-      stopFns.forEach((fn) => fn());
-
-      const failures = results
-        .filter((result) => result.status === 'rejected')
-        .map((result) => result.reason.message);
-      if (failures.length) {
-        throw new Error(failures.join(' | '));
-      }
-      return;
-    }
-
-    let rollingMessage = message;
-    for (const agent of enabledAgents) {
-      const stopThinking = startThinking(agent.id);
-      try {
-        const response = await sendMessageToFoundryAgent(agent, rollingMessage);
-        stopThinking();
-        agent.lastSpeech = response;
-        rollingMessage = `Previous agent response: ${response}`;
-      } catch (error) {
-        stopThinking();
-        throw new Error(`Agent ${agent.name} failed in sequential workflow: ${error.message}`);
-      }
+    switch (state.workflowMode) {
+      case 'sequential':
+        await runSequential(message, enabledAgents);
+        break;
+      case 'handoff':
+        await runHandoff(message, enabledAgents);
+        break;
+      case 'group_chat':
+        await runGroupChat(message, enabledAgents);
+        break;
+      case 'magentic':
+        await runMagentic(message, enabledAgents);
+        break;
+      default:
+        await runConcurrent(message, enabledAgents);
     }
   }
 
@@ -352,18 +1183,190 @@
     state.user.speech = message;
     renderOffice();
     setLog(`You said: "${message}"`);
+    addTrace({
+      agentName: state.user.name,
+      agentId: 'user',
+      type: 'user_message',
+      summary: message
+    });
 
     try {
       await processMessageThroughWorkflow(message);
+      clearArrow();
       renderOffice();
-      setLog(`Workflow "${state.workflowMode}" complete.`);
+      setLog(`Workflow "${state.workflowMode}" complete.`, 'var(--awake)');
     } catch (error) {
-      setLog(error.message);
+      clearArrow();
+      setLog(error.message, '#ef4444');
     }
   }
 
   ids.createNpcBtn.addEventListener('click', handleCreateNpc);
   ids.sendMessageBtn.addEventListener('click', handleSendMessage);
+
+  // Modal open/close
+  ids.createAgentModalBtn.addEventListener('click', () => {
+    ids.createAgentModal.style.display = 'flex';
+  });
+  ids.closeAgentModalBtn.addEventListener('click', () => {
+    ids.createAgentModal.style.display = 'none';
+  });
+  ids.createAgentModal.addEventListener('click', (e) => {
+    if (e.target === ids.createAgentModal) ids.createAgentModal.style.display = 'none';
+  });
+
+  // ── Agent detail modal ────────────────────────
+  ids.closeAgentDetailBtn.addEventListener('click', () => {
+    ids.agentDetailModal.style.display = 'none';
+  });
+  ids.agentDetailModal.addEventListener('click', (e) => {
+    if (e.target === ids.agentDetailModal) ids.agentDetailModal.style.display = 'none';
+  });
+
+  // ── Metrics summary modal ─────────────────────
+  ids.closeMetricsSummaryBtn.addEventListener('click', () => {
+    ids.metricsSummaryModal.style.display = 'none';
+  });
+  ids.metricsSummaryModal.addEventListener('click', (e) => {
+    if (e.target === ids.metricsSummaryModal) ids.metricsSummaryModal.style.display = 'none';
+  });
+
+  // ── Settings modal ────────────────────────────
+  ids.openSettingsBtn.addEventListener('click', () => {
+    renderSettingsModal();
+    ids.settingsModal.style.display = 'flex';
+  });
+  ids.closeSettingsBtn.addEventListener('click', () => {
+    ids.settingsModal.style.display = 'none';
+  });
+  ids.settingsModal.addEventListener('click', (e) => {
+    if (e.target === ids.settingsModal) ids.settingsModal.style.display = 'none';
+  });
+  ids.ttsEnabled.addEventListener('change', () => {
+    state.tts.enabled = ids.ttsEnabled.checked;
+  });
+  ids.autoHideBubbles.addEventListener('change', () => {
+    state.autoHideBubbles = ids.autoHideBubbles.checked;
+    if (!state.autoHideBubbles) {
+      state.agents.forEach((a) => { a.bubbleVisible = true; });
+      Object.keys(_bubbleTimers).forEach((id) => { clearTimeout(_bubbleTimers[id]); delete _bubbleTimers[id]; });
+    } else {
+      state.agents.forEach((a) => { a.bubbleVisible = false; });
+    }
+    renderOffice();
+  });
+  ids.showHandoffArrows.addEventListener('change', () => {
+    state.showHandoffArrows = ids.showHandoffArrows.checked;
+    if (!state.showHandoffArrows) clearArrow();
+  });
+  ids.ttsVoiceAssignments.addEventListener('change', (e) => {
+    const select = e.target.closest('[data-voice-agent]');
+    if (!select) return;
+    state.tts.voiceMap[select.dataset.voiceAgent] = select.value;
+  });
+  ids.sidebarFooter.addEventListener('click', (e) => {
+    if (e.target.closest('#openMetricsSummary')) showMetricsSummary();
+  });
+  ids.agentList.addEventListener('click', (e) => {
+    const link = e.target.closest('.agent-name-link');
+    if (!link) return;
+    e.preventDefault();
+    showAgentDetail(link.dataset.agentDetail);
+  });
+
+  // ── Clickable speech in sidebar ────────────────
+  ids.agentList.addEventListener('click', (e) => {
+    const speech = e.target.closest('[data-speech-agent]');
+    if (!speech) return;
+    const agentId = speech.dataset.speechAgent;
+    if (agentId) scrollToTraceForAgent(agentId);
+  });
+
+  function renderOrchestrationInfo() {
+    const mode = state.workflowMode;
+    const info = ORCHESTRATION_INFO[mode] || ORCHESTRATION_INFO.concurrent;
+    if (ids.orchestrationInfo) {
+      ids.orchestrationInfo.innerHTML =
+        '<div class="info-label">' + info.name + '</div>' +
+        '<div>' + info.summary + '</div>' +
+        '<div class="info-pattern">' + info.pattern + '</div>' +
+        '<div class="info-use-case">Use cases: ' + info.useCase + '</div>' +
+        '<a href="' + info.docUrl + '" target="_blank" rel="noopener">Documentation \u2197</a>';
+    }
+    const configs = ['sequentialConfig', 'handoffConfig', 'groupChatConfig', 'magenticConfig'];
+    configs.forEach((id) => { if (ids[id]) ids[id].style.display = 'none'; });
+    const configMap = { sequential: 'sequentialConfig', handoff: 'handoffConfig', group_chat: 'groupChatConfig', magentic: 'magenticConfig' };
+    const active = configMap[mode];
+    if (active && ids[active]) ids[active].style.display = '';
+  }
+
+  function populateAgentSelectors() {
+    const enabledAgents = state.agents.filter((a) => a.enabled);
+    [ids.triageAgent, ids.managerAgent].forEach((select) => {
+      if (!select) return;
+      const current = select.value;
+      select.innerHTML = '<option value="">First enabled agent</option>';
+      enabledAgents.forEach((a) => {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.name;
+        select.appendChild(opt);
+      });
+      if (current) select.value = current;
+    });
+    renderSequentialOrder();
+  }
+
+  function renderSequentialOrder() {
+    if (!ids.sequentialOrder) return;
+    const enabledAgents = state.agents.filter((a) => a.enabled);
+    if (!enabledAgents.length) {
+      ids.sequentialOrder.innerHTML = '<span class="status">No agents online.</span>';
+      return;
+    }
+    // Sync sequentialOrder with enabled agents
+    const enabledIds = new Set(enabledAgents.map((a) => a.id));
+    state.sequentialOrder = state.sequentialOrder.filter((id) => enabledIds.has(id));
+    enabledAgents.forEach((a) => {
+      if (!state.sequentialOrder.includes(a.id)) state.sequentialOrder.push(a.id);
+    });
+
+    ids.sequentialOrder.innerHTML = '';
+    state.sequentialOrder.forEach((agentId, idx) => {
+      const agent = state.agents.find((a) => a.id === agentId);
+      if (!agent) return;
+      const row = document.createElement('div');
+      row.className = 'seq-order-item';
+      const color = getAgentColor(agent.id);
+      row.innerHTML = `<span class="seq-order-num">${idx + 1}</span><span class="agent-color-dot" style="background:${color}"></span><span class="seq-order-name">${agent.name.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>`;
+      const btns = document.createElement('span');
+      btns.className = 'seq-order-btns';
+      if (idx > 0) {
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.textContent = '\u25B2';
+        up.title = 'Move up';
+        up.addEventListener('click', () => {
+          [state.sequentialOrder[idx - 1], state.sequentialOrder[idx]] = [state.sequentialOrder[idx], state.sequentialOrder[idx - 1]];
+          renderSequentialOrder();
+        });
+        btns.appendChild(up);
+      }
+      if (idx < state.sequentialOrder.length - 1) {
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.textContent = '\u25BC';
+        down.title = 'Move down';
+        down.addEventListener('click', () => {
+          [state.sequentialOrder[idx], state.sequentialOrder[idx + 1]] = [state.sequentialOrder[idx + 1], state.sequentialOrder[idx]];
+          renderSequentialOrder();
+        });
+        btns.appendChild(down);
+      }
+      row.appendChild(btns);
+      ids.sequentialOrder.appendChild(row);
+    });
+  }
 
   async function loadAgents() {
     try {
@@ -383,31 +1386,206 @@
           state.agents.push({
             id: createLocalId(),
             name: ra.name,
-            description: '',
+            description: ra.instructions || '',
             foundryAgentId: ra.id,
             foundryAgentName: ra.name,
+            kind: ra.kind || '',
+            model: ra.model || '',
             tools: ra.tools || [],
+            toolsRaw: ra.tools_raw || [],
             knowledge: ra.knowledge || [],
             memory: ra.memory || [],
             guardrail: ra.guardrail || '',
-            enabled: true,
-            lastSpeech: 'Ready to help!'
+            raiConfig: ra.rai_config || {},
+            metrics: null,
+            enabled: state.agents.filter((a) => a.enabled).length < MAX_ENABLED_AGENTS,
+            lastSpeech: 'Ready to help!',
+            bubbleSpeech: ''
           });
           added += 1;
         }
       });
+      await loadMetrics();
       renderAgentsPanel();
       renderOffice();
-      setLog(`Loaded ${added} new agent(s) from Foundry (${remoteAgents.length} total).`);
+      populateAgentSelectors();
+      const selectedCount = state.agents.filter((a) => a.enabled).length;
+      setLog(`${selectedCount} selected from Foundry (${remoteAgents.length} total).`);
     } catch (error) {
       setLog(error.message);
     }
   }
 
+  async function loadMetrics() {
+    try {
+      const metrics = await foundryRequest('/metrics', 'GET');
+      if (!metrics || typeof metrics !== 'object') return;
+      state.agents.forEach((agent) => {
+        const key = agent.foundryAgentName || agent.name;
+        if (metrics[key]) {
+          agent.metrics = metrics[key];
+        }
+      });
+    } catch {
+      // metrics are best-effort, don't block
+    }
+  }
+
+  // ── TTS Functions ─────────────────────────────
+  let _ttsAudioQueue = [];
+  let _ttsPlaying = false;
+
+  async function checkTtsStatus() {
+    try {
+      const result = await foundryRequest('/tts/status', 'GET');
+      state.tts.available = result?.available || false;
+      state.tts.voices = result?.voices || [];
+    } catch {
+      state.tts.available = false;
+      state.tts.voices = [];
+    }
+    renderSettingsModal();
+  }
+
+  function getVoiceForAgent(agentId) {
+    if (state.tts.voiceMap[agentId]) return state.tts.voiceMap[agentId];
+    // Auto-assign a distinct voice based on agent index
+    const idx = state.agents.findIndex((a) => a.id === agentId);
+    if (idx >= 0 && state.tts.voices.length) {
+      return state.tts.voices[idx % state.tts.voices.length].id;
+    }
+    return state.tts.voices.length ? state.tts.voices[0].id : '';
+  }
+
+  async function speakText(text, agentId) {
+    if (!state.tts.enabled || !state.tts.available) return;
+    const voice = getVoiceForAgent(agentId);
+    if (!voice) return;
+
+    // Truncate very long responses to keep TTS reasonable
+    const maxLen = 2000;
+    const ttsText = text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+
+    _ttsAudioQueue.push({ text: ttsText, voice, agentId });
+    if (!_ttsPlaying) _playNextTts();
+  }
+
+  async function _playNextTts() {
+    if (!_ttsAudioQueue.length) {
+      _ttsPlaying = false;
+      return;
+    }
+    _ttsPlaying = true;
+    const { text, voice, agentId } = _ttsAudioQueue.shift();
+    try {
+      const response = await fetch(`${API_BASE}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice })
+      });
+      if (!response.ok) {
+        _playNextTts();
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+
+      // Show speaker icon on the agent's bubble
+      const bubble = document.querySelector(`[data-agent-bubble="${agentId}"]`);
+      if (bubble && !bubble.querySelector('.tts-speaker-icon')) {
+        const icon = document.createElement('span');
+        icon.className = 'tts-speaker-icon';
+        icon.textContent = ' 🔊';
+        bubble.appendChild(icon);
+      }
+
+      audio.addEventListener('ended', () => {
+        URL.revokeObjectURL(url);
+        const icon = bubble?.querySelector('.tts-speaker-icon');
+        if (icon) icon.remove();
+        _playNextTts();
+      });
+      audio.addEventListener('error', () => {
+        URL.revokeObjectURL(url);
+        _playNextTts();
+      });
+      audio.play().catch(() => _playNextTts());
+    } catch {
+      _playNextTts();
+    }
+  }
+
+  function renderSettingsModal() {
+    if (ids.autoHideBubbles) {
+      ids.autoHideBubbles.checked = state.autoHideBubbles;
+    }
+    if (ids.showHandoffArrows) {
+      ids.showHandoffArrows.checked = state.showHandoffArrows;
+    }
+    if (!ids.ttsSettings || !ids.ttsUnavailable) return;
+    if (state.tts.available) {
+      ids.ttsUnavailable.style.display = 'none';
+      ids.ttsSettings.style.display = '';
+      ids.ttsEnabled.checked = state.tts.enabled;
+      renderVoiceAssignments();
+    } else {
+      ids.ttsUnavailable.style.display = '';
+      ids.ttsSettings.style.display = 'none';
+    }
+  }
+
+  function renderVoiceAssignments() {
+    if (!ids.ttsVoiceAssignments) return;
+    ids.ttsVoiceAssignments.innerHTML = '';
+    if (!state.tts.voices.length || !state.agents.length) {
+      ids.ttsVoiceAssignments.innerHTML = '<span class="status">Load agents first to assign voices.</span>';
+      return;
+    }
+
+    state.agents.forEach((agent) => {
+      const row = document.createElement('div');
+      row.className = 'tts-voice-row';
+      const color = getAgentColor(agent.id);
+      const currentVoice = getVoiceForAgent(agent.id);
+      let options = state.tts.voices.map((v) => {
+        const selected = v.id === currentVoice ? ' selected' : '';
+        return `<option value="${v.id}"${selected}>${esc(v.label)}</option>`;
+      }).join('');
+      row.innerHTML = `<span class="agent-color-dot" style="background:${color}"></span><span class="tts-voice-agent-name">${esc(agent.name)}</span><select data-voice-agent="${agent.id}">${options}</select>`;
+      ids.ttsVoiceAssignments.appendChild(row);
+    });
+  }
+
   ids.loadAgentsBtn.addEventListener('click', loadAgents);
   ids.workflowMode.addEventListener('change', () => {
     state.workflowMode = ids.workflowMode.value;
-    setLog(`Workflow set to ${state.workflowMode}.`);
+    renderOrchestrationInfo();
+    populateAgentSelectors();
+    setLog(`Orchestration set to ${ORCHESTRATION_INFO[state.workflowMode]?.name || state.workflowMode}.`);
+  });
+  ids.handoffMode.addEventListener('change', () => {
+    state.handoffMode = ids.handoffMode.value;
+  });
+  if (ids.triageAgent) {
+    ids.triageAgent.addEventListener('change', () => {
+      state.triageAgentId = ids.triageAgent.value;
+    });
+  }
+  if (ids.managerAgent) {
+    ids.managerAgent.addEventListener('change', () => {
+      state.managerAgentId = ids.managerAgent.value;
+    });
+  }
+  if (ids.maxRoundsInput) {
+    ids.maxRoundsInput.addEventListener('change', () => {
+      state.maxRounds = parseInt(ids.maxRoundsInput.value, 10) || 3;
+    });
+  }
+
+  ids.clearTraceBtn.addEventListener('click', () => {
+    state.trace = [];
+    renderTracePanel();
   });
 
   ids.agentList.addEventListener('change', (event) => {
@@ -421,9 +1599,18 @@
       return;
     }
 
+    if (target.checked) {
+      const enabledCount = state.agents.filter((a) => a.enabled).length;
+      if (enabledCount >= MAX_ENABLED_AGENTS) {
+        target.checked = false;
+        setLog(`Max ${MAX_ENABLED_AGENTS} agents can be online at once.`);
+        return;
+      }
+    }
     agent.enabled = target.checked;
     renderAgentsPanel();
     renderOffice();
+    populateAgentSelectors();
     setLog(`${agent.name} is now ${agent.enabled ? 'online' : 'sleeping'} at their desk.`);
   });
 
@@ -443,7 +1630,69 @@
     handleSendToAgent(target.dataset.agentInput);
   });
 
+  // ── Info bubble tooltip (fixed position) ──────
+  const tooltip = document.getElementById('infoBubbleTooltip');
+  ids.agentList.addEventListener('mouseenter', (e) => {
+    if (!e.target.classList.contains('info-bubble')) return;
+    const text = e.target.dataset.tooltip || '';
+    if (!text) return;
+    const rect = e.target.getBoundingClientRect();
+    tooltip.textContent = text;
+    tooltip.style.display = '';
+    tooltip.style.left = rect.left + 'px';
+    tooltip.style.top = (rect.bottom + 6) + 'px';
+    // clamp to viewport
+    requestAnimationFrame(() => {
+      const tr = tooltip.getBoundingClientRect();
+      if (tr.right > window.innerWidth - 8) {
+        tooltip.style.left = Math.max(8, window.innerWidth - tr.width - 8) + 'px';
+      }
+      if (tr.bottom > window.innerHeight - 8) {
+        tooltip.style.top = (rect.top - tr.height - 6) + 'px';
+      }
+    });
+  }, true);
+  ids.agentList.addEventListener('mouseleave', (e) => {
+    if (!e.target.classList.contains('info-bubble')) return;
+    tooltip.style.display = 'none';
+  }, true);
+
+  // ── Trace sidebar toggle ──────────────────────
+  ids.hideTraceBtn.addEventListener('click', () => {
+    ids.traceSidebar.style.display = 'none';
+    ids.showTraceBtn.style.display = '';
+    document.querySelector('.app').style.marginRight = '0';
+  });
+  ids.showTraceBtn.addEventListener('click', () => {
+    ids.traceSidebar.style.display = '';
+    ids.showTraceBtn.style.display = 'none';
+    document.querySelector('.app').style.marginRight = ids.traceSidebar.style.width || '';
+  });
+
+  // ── Trace sidebar resize ─────────────────────
+  ids.traceResizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = ids.traceSidebar.getBoundingClientRect().width;
+
+    function onMouseMove(e) {
+      const newWidth = Math.max(180, Math.min(600, startWidth + (startX - e.clientX)));
+      ids.traceSidebar.style.width = newWidth + 'px';
+      document.querySelector('.app').style.marginRight = newWidth + 'px';
+    }
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    }
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+
   renderAgentsPanel();
   renderOffice();
+  renderTracePanel();
+  renderOrchestrationInfo();
+  populateAgentSelectors();
   loadAgents();
+  checkTtsStatus();
 })();
